@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { FileText, X } from 'lucide-react';
 import type { GraphMediaPreview, GraphWorkflowPayload } from './types';
-import { jsonFetch } from './utils/graph-api';
+import { JsonFetchError, jsonFetch } from './utils/graph-api';
 
 type Result = {
   artifact_id: string; run_id: string; node_title: string; output_port: string; output_index: number;
@@ -38,7 +38,7 @@ export function useAssistantResults({ sessionId, runId, runStatus, workspaceKey,
   const key = `${workspaceKey}:${sessionId}:${runId}:${requestedKey}`;
   const activeKey = useRef(key);
   activeKey.current = key;
-  const [state, setState] = useState<{ key: string; data?: Results; loaded?: boolean; selectionBindings?: Results['selected_result_bindings']; items?: Result[]; resultErrors?: Record<string, string>; error?: string }>({ key });
+  const [state, setState] = useState<{ key: string; data?: Results; loaded?: boolean; selectionBindings?: Results['selected_result_bindings']; items?: Result[]; resultErrors?: Record<string, Error>; error?: string }>({ key });
   const [selecting, setSelecting] = useState<{ key: string; version: number } | null>(null);
   const [selectionFailure, setSelectionFailure] = useState<{ key: string; item: Result; selected: boolean; detail: string } | null>(null);
   const selectionBusy = selecting?.key === key;
@@ -56,7 +56,7 @@ export function useAssistantResults({ sessionId, runId, runStatus, workspaceKey,
         const runIds = [...new Set([primaryRunId, ...requestedResults.map((binding) => binding.run_id)])];
         const runs: Results[] = [];
         let currentRun: Results | undefined;
-        const resultErrors: Record<string, string> = {};
+        const resultErrors: Record<string, Error> = {};
         async function readRuns(ids: string[]) {
           const reads = await Promise.allSettled(ids.map(readRun));
           reads.forEach((read, index) => {
@@ -64,7 +64,7 @@ export function useAssistantResults({ sessionId, runId, runStatus, workspaceKey,
               runs.push(read.value);
               if (ids[index] === primaryRunId) currentRun = read.value;
             }
-            else resultErrors[ids[index]] = (read.reason as Error).message;
+            else resultErrors[ids[index]] = read.reason instanceof Error ? read.reason : new Error(String(read.reason));
           });
         }
         await readRuns(runIds);
@@ -84,7 +84,7 @@ export function useAssistantResults({ sessionId, runId, runStatus, workspaceKey,
             return applied ? null : current;
           });
           setState({ key, data: currentRun, loaded: true, selectionBindings,
-            items: runs.flatMap((run) => run.items), resultErrors, error: resultErrors[primaryRunId] });
+            items: runs.flatMap((run) => run.items), resultErrors, error: resultErrors[primaryRunId]?.message });
           if (['queued', 'pending', 'running'].includes(runStatus ?? currentRun?.status ?? '')) timer = setTimeout(() => void refresh(), 3000);
         }
       } catch (error) {
@@ -135,12 +135,14 @@ type ResultController = ReturnType<typeof useAssistantResults>;
 function AssistantSelectionRecovery({ results, disabled, onAsk }: { results: ResultController; disabled: boolean; onAsk?: () => void }) {
   const failure = results.selectionFailure;
   if (!failure) return null;
+  const retryable = !results.resultErrors[failure.item.run_id] && results.items.some(item =>
+    item.artifact_id === failure.item.artifact_id && item.run_id === failure.item.run_id && item.version === failure.item.version && (!failure.selected || item.available));
   return <div className="graph-assistant-card-actions">
     <p role="alert">{failure.selected
       ? 'Couldn’t confirm this media selection. Check the media in this conversation, then retry the selection. Nothing will regenerate.'
       : 'Couldn’t confirm that this media was removed from the conversation. Check the media in this conversation, then retry the removal. The media file will stay saved.'}</p>
     <details><summary>Selection request details</summary><p>{failure.detail}</p></details>
-    <button type="button" disabled={disabled || results.busy} onClick={async () => { if (await results.retrySelection()) onAsk?.(); }}>
+    <button type="button" disabled={disabled || results.busy || !retryable} onClick={async () => { if (await results.retrySelection()) onAsk?.(); }}>
       {failure.selected ? 'Retry media selection' : 'Retry removing media'}
     </button>
   </div>;
@@ -234,6 +236,14 @@ export function AssistantRequestedResult({ binding, results, disabled, onAsk, on
   const item = results.items.find((value) => value.run_id === binding.run_id && value.artifact_id === binding.artifact_id);
   const error = results.resultErrors[binding.run_id];
   if (!results.loaded && !error) return <p role="status">Loading requested image…</p>;
+  const unavailable = error instanceof JsonFetchError && error.status !== null && error.status >= 400 && error.status < 500;
+  if (error && !unavailable) return <section aria-label="Requested image">
+    {results.selectionFailure?.selected && results.selectionFailure.item.run_id === binding.run_id && results.selectionFailure.item.artifact_id === binding.artifact_id && results.selectionFailure.item.version === binding.version
+      ? <AssistantSelectionRecovery results={results} disabled={disabled} onAsk={onAsk} /> : null}
+    <p role="alert">Couldn’t load this requested image. Check your connection and try loading it again. No new run will start.</p>
+    <details><summary>Result request details</summary><p>{error.message}</p></details>
+    <button type="button" disabled={disabled || results.busy} onClick={results.retry}>Try loading requested image again</button>
+  </section>;
   if (error || !item || !item.available || item.version !== binding.version || item.media_type !== 'image') {
     return <p role="alert">This exact image is unavailable or changed. Ask to show it again or choose another result; nothing will regenerate.</p>;
   }

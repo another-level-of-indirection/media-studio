@@ -171,3 +171,33 @@ it('recovers an unconfirmed media removal without deleting the media file', asyn
     expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(2);
     expect(fetcher.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(false);
 });
+
+it('preserves selection uncertainty through a failed results reload and verifies the exact version before retrying', async () => {
+  let requested = false, readable = true, selected = false;
+  const fetcher = vi.fn(async (_url: string, init?: RequestInit) => {
+    if (init?.method === 'POST') {
+      expect(JSON.parse(String(init.body))).toEqual({ ...binding, selected: true });
+      if (!requested) { requested = true; readable = false; throw new TypeError('Selection response lost'); }
+      selected = true;
+    }
+    if (!readable) throw new TypeError('Results connection lost');
+    return reply({ ...response, run_id: binding.run_id, items: [original],
+      selected_artifact_ids: selected ? ['original'] : [], selected_result_bindings: selected ? { original: binding } : {} });
+  });
+  vi.stubGlobal('fetch', fetcher); render(<Harness runId={null} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Use in chat — Original storyboard' }));
+  expect(await screen.findByText('Couldn’t load this requested image. Check your connection and try loading it again. No new run will start.')).toBeTruthy();
+  expect(screen.getByText('Couldn’t confirm this media selection. Check the media in this conversation, then retry the selection. Nothing will regenerate.')).toBeTruthy();
+  expect(screen.getByText('Selection response lost').closest('details')).not.toBeNull();
+  expect(screen.getByText('Results connection lost').closest('details')).not.toBeNull();
+  expect(screen.getByRole('button', { name: 'Retry media selection' })).toHaveProperty('disabled', true);
+  expect(screen.queryByText(/This exact image is unavailable or changed/)).toBeNull();
+  readable = true; fireEvent.click(screen.getByRole('button', { name: 'Try loading requested image again' }));
+  expect(await screen.findByRole('img')).toBeTruthy();
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Retry media selection' })).toHaveProperty('disabled', false));
+  expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
+  fireEvent.click(screen.getByRole('button', { name: 'Retry media selection' }));
+  expect(await screen.findByRole('button', { name: 'In this conversation — Original storyboard' })).toBeTruthy();
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(2);
+});
