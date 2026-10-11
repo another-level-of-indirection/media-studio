@@ -98,7 +98,7 @@ GUARDRAILS = (
 # confirmation/persistence boundaries; measured source cap, no reserve.
 ASSISTANT_PACKAGE_GUARDRAIL = PackageGuardrail(
     "apps/api/app/assistant",
-    13_069,
+    13_071,
     "Media Assistant Python source package; reviewed candidate cap",
 )
 

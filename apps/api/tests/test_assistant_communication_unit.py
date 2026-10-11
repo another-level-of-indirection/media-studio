@@ -177,6 +177,27 @@ class CommunicationTests(unittest.TestCase):
         self.assertNotIn('Choose Rename workflow', copy)
         self.assertIn('before applying', copy)
 
+    def test_confirmable_hold_keeps_run_blockers_and_confirmation_action(self):
+        result = self.run_turn({'capability': 'graph_builder', 'artifact_intent': 'none', 'tool_call': {'name': 'propose_graph_operations', 'arguments': '{}'}},
+            execution=self.execution('propose_graph_operations', {'proposal_id': 'hold', 'confirmation_token': 'token',
+                'operations': [{'op': 'set_execution_mode', 'node_id': 'image', 'execution_mode': 'frozen'}],
+                'confirmable': True, 'validation': {'valid': False, 'errors': [{'code': 'missing_prompt', 'message': 'Add a prompt before running.'}]}}))
+        self.assertIn('Add a prompt before running.', result.reply)
+        self.assertIn('Choose Apply node changes to confirm.', result.reply)
+        self.assertNotIn('Review the requirements before applying.', result.reply)
+        self.assertEqual(result.next_action.label, 'Apply node changes')
+
+    def test_stored_missing_media_names_match_supported_review_labels(self):
+        from app.assistant.completion import terminal_artifact_reply
+        labels = [('metadata', key) for key in ('customTitle', 'custom_title', 'title', 'label')] + [('fields', key) for key in ('title', 'label', 'name')]
+        for container, key in labels:
+            with self.subTest(container=container, key=key):
+                node = {'id': 'technical-id', 'type': 'media.load_image', container: {'ui': {key: ' Person photo '}} if container == 'metadata' else {key: ' Person photo '}}
+                copy = terminal_artifact_reply('graph_proposal', {'operations': [{'op': 'rename_workflow', 'title': 'Stored graph'}],
+                    'workflow': {'nodes': [node]}, 'validation': {'valid': False, 'errors': [{'code': 'missing_media_reference', 'node_id': 'technical-id'}]}})
+                self.assertIn('Choose media for Person photo before running', copy)
+                self.assertNotIn('technical-id', copy)
+
     def test_missing_preset_and_recipe_replies_name_unsaved_typed_drafts(self):
         for name, kind, label in [('draft_preset', 'preset_draft', 'Media Preset'), ('draft_recipe', 'recipe_draft', 'Prompt Recipe')]:
             with self.subTest(kind=kind):

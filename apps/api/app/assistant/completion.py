@@ -25,12 +25,14 @@ def terminal_artifact_reply(kind: str | None, result: dict[str, Any]) -> str:
                     continue
                 seen.add(node_id)
                 node = nodes.get(node_id) or {}
-                name = (node.get("metadata") or {}).get("ui", {}).get("customTitle") or node_id or "the required input"
+                ui, fields = (node.get("metadata") or {}).get("ui") or {}, node.get("fields") or {}
+                name = next((ui.get(key) for key in ("customTitle", "custom_title", "title", "label") if ui.get(key)), None) or next((fields.get(key) for key in ("title", "label", "name") if fields.get(key)), None)
+                name = name.strip() if isinstance(name, str) and name.strip() else str(node.get("type") or "the required input").replace(".", " ")
                 requirements.append(f"Choose media for {name} before running this graph.")
             else:
                 requirements.append(str(error.get("message") or "Review the validation issue."))
         copy += (" " + " ".join(requirements)) if requirements else ""
-        if result.get("confirmable") is False or (validation.get("valid") is False and any(error.get("code") != "missing_media_reference" for error in validation.get("errors") or [])):
+        if result.get("confirmable") is False or (result.get("confirmable") is not True and validation.get("valid") is False and any(error.get("code") != "missing_media_reference" for error in validation.get("errors") or [])):
             return copy + " Review the requirements before applying."
         return copy + (f" Choose {label} to confirm. This does not start a run." if label else "")
     if kind in {"preset_draft", "recipe_draft"}:
