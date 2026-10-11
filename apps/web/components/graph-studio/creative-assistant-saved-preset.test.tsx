@@ -309,7 +309,8 @@ it("preserves an upstream planning error instead of masking it with an unrelated
   fireEvent.click(await screen.findByRole("button", { name: "Create a clean graph with Storyboard Writer" }));
 
   expect(await screen.findByText("Upstream assistant unavailable.")).toBeTruthy();
-  expect(container.querySelectorAll(".graph-assistant-message-assistant")).toHaveLength(0);
+  expect(screen.queryByRole("region", { name: "Graph review" })).toBeNull();
+  expect(container.querySelectorAll(".graph-assistant-message-plan")).toHaveLength(0);
 });
 
 it("stops a delayed clarification refresh without replacing the cancelled session", async () => {
@@ -375,4 +376,55 @@ it("stops a delayed clarification refresh without replacing the cancelled sessio
   });
 
   await waitFor(() => expect(container.querySelectorAll(".graph-assistant-message-assistant")).toHaveLength(0));
+});
+
+it.each(['response', 'followup', 'unconfirmed'])('recovers saved-artifact graph planning after %s loss without erasing an unrelated draft or repeating the request', async (failure) => {
+    let requested = false, failedRead = false, online = failure !== 'unconfirmed', requestText = '';
+    const originalWorkflow = { ...workflow, nodes: [{ id: 'existing', type: 'utility.note', position: { x: 0, y: 0 }, fields: { text: 'Keep this existing graph.' } }] };
+    const recoveredPlan = { ...plan, graph_plan: { ...plan.graph_plan, operations: [{ op: 'add_node', node_ref: 'prompt', node_type: 'prompt.text', title: 'Amber prompt', fields: { text: 'Keep amber light' }, position: { x: 0, y: 0 } }], metadata: { kernel_proposal: true, independent_stage: true, source_workflow_id: 'workflow-1' } }, workflow: { ...workflow, workflow_id: null, nodes: [{ id: 'prompt', type: 'prompt.text', position: { x: 0, y: 0 }, fields: { text: 'Keep amber light' } }] } };
+    const initial = { ...session, messages: [savedRecipeMessage] };
+    const refreshed = () => ({ ...session, messages: [savedRecipeMessage, { ...savedRecipeGraphRequestMessage, content_text: requestText }, { assistant_message_id: 'recovered', assistant_session_id: 'session-1', role: 'assistant', content_text: 'Prepared a graph for review.', content_json: { mode: 'assistant_kernel', next_action: { kind: 'confirm_graph', label: 'Add to canvas', proposal_id: 'plan-1', confirmation_token: 'confirm-plan-1', requires_confirmation: true, payload: { proposal_id: 'plan-1', confirmation_token: 'confirm-plan-1' } } } }], latest_plan: recoveredPlan });
+    const fetcher = vi.fn((url: string, init?: RequestInit) => {
+        if (url.endsWith('/progress'))
+            return jsonResponse(assistantIdleProgress);
+        if (url.endsWith('/plans')) {
+            requested = true;
+            requestText = JSON.parse(String(init?.body)).message;
+            return failure === 'followup' ? jsonResponse(recoveredPlan) : Promise.reject(new TypeError('Failed to fetch'));
+        }
+        if (url.endsWith('/session-1')) {
+            if (!requested)
+                return jsonResponse(initial);
+            if (!online || (failure === 'followup' && !failedRead)) {
+                failedRead = true;
+                return Promise.reject(new TypeError('Failed to fetch'));
+            }
+            return jsonResponse(refreshed());
+        }
+        if (url.endsWith('/apply'))
+            return jsonResponse({ ...recoveredPlan, plan: { ...recoveredPlan.plan, status: 'applied' } });
+        return jsonResponse({});
+    });
+    vi.stubGlobal('fetch', fetcher);
+    const onApply = vi.fn();
+    render(<CreativeAssistantPanel open workspaceKey="plan-recovery" initialAssistantSessionId="session-1" workflowId="workflow-1" workflowName="Assistant Graph" workflow={originalWorkflow} references={[]} importImageFile={vi.fn()} onApplyWorkflow={onApply} onClose={vi.fn()}/>);
+    const create = await screen.findByRole('button', { name: 'Replace current graph with Storyboard Writer' });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Assistant message' }), { target: { value: 'My unrelated unsent creative note.' } });
+    fireEvent.click(create);
+    if (failure === 'unconfirmed') {
+        expect(await screen.findByText('Couldn’t confirm whether the graph proposal was prepared. Reload the saved conversation before trying again.')).toBeTruthy();
+        expect(screen.getByRole('button', { name: 'Replace current graph with Storyboard Writer' })).toHaveProperty('disabled', true);
+        online = true;
+        fireEvent.click(screen.getByRole('button', { name: 'Reload saved conversation' }));
+    }
+    const apply = await screen.findByRole('button', { name: 'Open new workflow' });
+    await waitFor(() => expect(apply).toHaveProperty('disabled', false));
+    expect(screen.getByRole('textbox', { name: 'Assistant message' })).toHaveProperty('value', 'My unrelated unsent creative note.');
+    expect(fetcher.mock.calls.filter(([url]) => url.endsWith('/plans'))).toHaveLength(1);
+    expect(onApply).not.toHaveBeenCalled();
+    fireEvent.click(apply);
+    await waitFor(() => expect(onApply).toHaveBeenCalledOnce());
+    const request = fetcher.mock.calls.find(([url]) => url.endsWith('/apply'));
+    expect(JSON.parse(String(request?.[1]?.body))).toMatchObject({ proposal_id: 'plan-1', confirmation_token: 'confirm-plan-1', workflow: { nodes: [] } });
+    expect(fetcher.mock.calls.some(([url]) => url.endsWith('/runs'))).toBe(false);
 });

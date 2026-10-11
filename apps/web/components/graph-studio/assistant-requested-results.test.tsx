@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { AssistantRequestedResult, requestedResultBindings, useAssistantResults } from './assistant-results';
+import { AssistantRequestedResult, AssistantResultAttachments, requestedResultBindings, useAssistantResults } from './assistant-results';
 
 const binding = { run_id: 'original-run', artifact_id: 'original', version: 'v1' };
 const original = { ...binding, node_title: 'Original storyboard', output_port: 'image', output_index: 0, media_type: 'image', available: true, url: '/original.png' };
@@ -79,4 +79,95 @@ it.each(['current-run', null])('isolates an unavailable primary run (%s) from a 
   render(<Harness runId={runId} requested={[{ ...binding, run_id: 'missing-run' }, binding]} />);
   expect(await screen.findByRole('img')).toHaveProperty('src', 'http://localhost:3000/original.png');
   expect(screen.getByRole('button', { name: 'Use in chat — Original storyboard' })).toHaveProperty('disabled', false);
+});
+
+it.each(['connection', 'server'])('keeps historical selection %s recovery visible without a current run and retries only on request', async (failure) => {
+    let failed = true, selected = false;
+    const fetcher = vi.fn(async (_url: string, init?: RequestInit) => {
+        if (init?.method === 'POST') {
+            expect(JSON.parse(String(init.body))).toEqual({ ...binding, selected: true });
+            if (failed) {
+                if (failure === 'connection')
+                    throw new TypeError('Failed to fetch');
+                return new Response('Internal Server Error', { status: 500 });
+            }
+            selected = true;
+        }
+        return reply({ ...response, run_id: binding.run_id, items: [original], selected_artifact_ids: selected ? [binding.artifact_id] : [], selected_result_bindings: selected ? { original: binding } : {} });
+    });
+    vi.stubGlobal('fetch', fetcher);
+    render(<Harness runId={null}/>);
+    fireEvent.click(await screen.findByRole('button', { name: 'Use in chat — Original storyboard' }));
+    expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Couldn’t confirm this media selection. Check the media in this conversation, then retry the selection. Nothing will regenerate.');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Retry media selection' })).toHaveProperty('disabled', false));
+    expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
+    expect(screen.getByText(failure === 'connection' ? 'Failed to fetch' : 'Request failed with 500').closest('details')).not.toBeNull();
+    failed = false;
+    fireEvent.click(screen.getByRole('button', { name: 'Retry media selection' }));
+    expect(await screen.findByRole('button', { name: 'In this conversation — Original storyboard' })).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(onAsk).toHaveBeenCalledOnce();
+    expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(2);
+});
+it('reconciles a lost selection response that actually persisted without posting again', async () => {
+    let persisted = false;
+    const fetcher = vi.fn(async (_url: string, init?: RequestInit) => {
+        if (init?.method === 'POST') {
+            persisted = true;
+            throw new TypeError('Response lost');
+        }
+        return reply({ ...response, run_id: binding.run_id, items: [original],
+            selected_artifact_ids: persisted ? ['original'] : [], selected_result_bindings: persisted ? { original: binding } : {} });
+    });
+    vi.stubGlobal('fetch', fetcher);
+    render(<Harness runId={null}/>);
+    fireEvent.click(await screen.findByRole('button', { name: 'Use in chat — Original storyboard' }));
+    expect(await screen.findByRole('button', { name: 'In this conversation — Original storyboard' })).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
+    expect(onAsk).not.toHaveBeenCalled();
+});
+it('keeps a changed historical version unavailable after a rejected selection', async () => {
+    let changed = false;
+    const fetcher = vi.fn(async (_url: string, init?: RequestInit) => {
+        if (init?.method === 'POST') {
+            changed = true;
+            return new Response(JSON.stringify({ detail: 'This exact result changed.' }), { status: 409 });
+        }
+        return reply({ ...response, run_id: binding.run_id, items: [{ ...original, version: changed ? 'v2' : 'v1' }] });
+    });
+    vi.stubGlobal('fetch', fetcher);
+    render(<Harness runId={null}/>);
+    fireEvent.click(await screen.findByRole('button', { name: 'Use in chat — Original storyboard' }));
+    expect(await screen.findByText('This exact image is unavailable or changed. Ask to show it again or choose another result; nothing will regenerate.')).toBeTruthy();
+    expect(screen.queryByRole('img')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Retry media selection' })).toBeNull();
+    expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
+});
+it('recovers an unconfirmed media removal without deleting the media file', async () => {
+    let failed = true, selected = true;
+    const fetcher = vi.fn(async (_url: string, init?: RequestInit) => {
+        if (init?.method === 'POST') {
+            expect(JSON.parse(String(init.body))).toEqual({ ...binding, selected: false });
+            if (failed)
+                throw new TypeError('Removal response lost');
+            selected = false;
+        }
+        return reply({ ...response, run_id: binding.run_id, items: [original],
+            selected_artifact_ids: selected ? ['original'] : [], selected_result_bindings: selected ? { original: binding } : {} });
+    });
+    function Attachments() {
+        const results = useAssistantResults({ sessionId: 'session', runId: null, workspaceKey: 'session', enabled: true, requestedResults: [binding] });
+        return <AssistantResultAttachments results={results} disabled={false}/>;
+    }
+    vi.stubGlobal('fetch', fetcher);
+    render(<Attachments />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove from conversation: Original storyboard' }));
+    expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Couldn’t confirm that this media was removed from the conversation. Check the media in this conversation, then retry the removal. The media file will stay saved.');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Retry removing media' })).toHaveProperty('disabled', false));
+    failed = false;
+    fireEvent.click(screen.getByRole('button', { name: 'Retry removing media' }));
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Media in this conversation' })).toBeNull());
+    expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(2);
+    expect(fetcher.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(false);
 });

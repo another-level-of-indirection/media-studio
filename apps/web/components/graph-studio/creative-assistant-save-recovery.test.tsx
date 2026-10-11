@@ -10,7 +10,7 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 it.each([
   { label: "Media Preset", kind: "save_media_preset", endpoint: "preset-saves", proposalKey: "kernel_preset_proposal", list: "preset list" },
   { label: "Prompt Recipe", kind: "save_prompt_recipe", endpoint: "recipe-saves", proposalKey: "kernel_recipe_proposal", list: "recipe list" },
-].flatMap(product => ["connection", "rejection"].map(failure => ({ ...product, failure }))))(
+].flatMap(product => ["connection", "rejection", "server"].map(failure => ({ ...product, failure }))))(
   "keeps $label confirmation after a $failure failure and retries the same approved draft",
   async ({ label, kind, endpoint, proposalKey, list, failure }) => {
   const message = { assistant_message_id: "review", assistant_session_id: "session-1", role: "assistant", content_text: `${label} draft prepared for review. This draft has not been saved.`,
@@ -27,7 +27,7 @@ it.each([
     if (url.endsWith(`/${endpoint}`)) {
       if (!attempted) {
         attempted = true;
-        return failure === "connection"
+        return failure === "server" ? Promise.resolve(new Response("Internal Server Error", { status: 500 })) : failure === "connection"
           ? Promise.reject(new TypeError("Failed to fetch"))
           : Promise.resolve(Response.json({ detail: rejectedMessage }, { status: 422 }));
       }
@@ -45,7 +45,7 @@ it.each([
   fireEvent.click(screen.getByRole("button",{name:/send chat message/i}));
   const buttonName = `Save confirmed ${label}`;
   fireEvent.click(await screen.findByRole("button",{name:buttonName}));
-  const expectedMessage = failure === "connection"
+  const expectedMessage = failure !== "rejection"
     ? `Couldn’t confirm whether your ${label} was saved. Check the ${list} before trying again.`
     : rejectedMessage;
   expect(await screen.findByText(expectedMessage)).toBeTruthy();

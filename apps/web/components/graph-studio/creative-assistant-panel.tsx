@@ -754,8 +754,7 @@ export function CreativeAssistantPanel({
       referencePicker.prependItems([reference]);
       await assistant.attachReference(reference, firstImage.name);
     } catch (requestError) {
-      const message = requestError instanceof Error && requestError.message ? requestError.message : "Unable to attach reference media.";
-      onEvent?.(message, "error");
+      assistant.reportReferenceImportFailure(requestError);
     }
   };
   const onDrop = (event: DragEvent<HTMLDivElement>) => {
@@ -1230,7 +1229,7 @@ export function CreativeAssistantPanel({
                     <div className="graph-assistant-card-actions graph-assistant-activity-actions">
                       <button
                         type="button"
-                        disabled={assistant.busy}
+                        disabled={assistant.busy || Boolean(assistant.failedRequest && !assistant.failedRequest.checked)}
                         onClick={() => void assistant.useSavedArtifactInGraph(message)}
                         aria-label={graphAction.ariaLabel}
                       >
@@ -1532,6 +1531,7 @@ export function CreativeAssistantPanel({
 
         <footer className="graph-assistant-footer">
           {assistant.error ? <p className="graph-assistant-error">{assistant.error}</p> : null}
+          {assistant.errorDetails && assistant.errorDetails !== assistant.error ? <details><summary>Request details</summary><p>{assistant.errorDetails}</p></details> : null}
           {assistant.failedRequest ? <section aria-label="Request recovery">
             <p>{assistant.failedRequest.checked ? "Sending again makes a new attempt. Continue planning, when available, uses the saved checkpoint." : "The outcome is not confirmed. Check the saved conversation before sending again."}</p>
             <details><summary>Connection details</summary><p>Code: {assistant.failedRequest.code}. HTTP status: {assistant.failedRequest.status ?? "unavailable"}.</p></details>

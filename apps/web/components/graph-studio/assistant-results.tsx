@@ -39,12 +39,14 @@ export function useAssistantResults({ sessionId, runId, runStatus, workspaceKey,
   const activeKey = useRef(key);
   activeKey.current = key;
   const [state, setState] = useState<{ key: string; data?: Results; loaded?: boolean; selectionBindings?: Results['selected_result_bindings']; items?: Result[]; resultErrors?: Record<string, string>; error?: string }>({ key });
-  const [selecting, setSelecting] = useState<string | null>(null);
+  const [selecting, setSelecting] = useState<{ key: string; version: number } | null>(null);
+  const [selectionFailure, setSelectionFailure] = useState<{ key: string; item: Result; selected: boolean; detail: string } | null>(null);
+  const selectionBusy = selecting?.key === key;
   const [revision, setRevision] = useState(0);
   const requestVersion = useRef(0);
   useEffect(() => {
     const primaryRunId = runId || requestedResults[0]?.run_id;
-    if (!enabled || !sessionId || !primaryRunId || selecting) return;
+    if (!enabled || !sessionId || !primaryRunId || selectionBusy) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const version = ++requestVersion.current;
@@ -72,6 +74,15 @@ export function useAssistantResults({ sessionId, runId, runStatus, workspaceKey,
           .filter((id) => !runIds.includes(id));
         await readRuns(selectedRunIds);
         if (!cancelled && requestVersion.current === version) {
+          // Only authoritative reads can resolve whether a lost selection response actually succeeded.
+          if (runs.length) setSelectionFailure(current => {
+            if (!current || current.key !== key) return current;
+            const binding = selectionBindings[current.item.artifact_id];
+            const applied = current.selected
+              ? binding?.run_id === current.item.run_id && binding.version === current.item.version
+              : !binding;
+            return applied ? null : current;
+          });
           setState({ key, data: currentRun, loaded: true, selectionBindings,
             items: runs.flatMap((run) => run.items), resultErrors, error: resultErrors[primaryRunId] });
           if (['queued', 'pending', 'running'].includes(runStatus ?? currentRun?.status ?? '')) timer = setTimeout(() => void refresh(), 3000);
@@ -82,29 +93,36 @@ export function useAssistantResults({ sessionId, runId, runStatus, workspaceKey,
     }
     void refresh();
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [key, sessionId, runId, runStatus, revision, selectionVersion, selecting, enabled, requestedKey]);
+  }, [key, sessionId, runId, runStatus, revision, selectionVersion, selectionBusy, enabled, requestedKey]);
   const data = state.key === key ? state.data : undefined;
   const error = state.key === key ? state.error : undefined;
   async function select(item: Result, selected: boolean) {
-    if (selecting || !sessionId) return false;
-    ++requestVersion.current;
-    setSelecting(item.artifact_id);
+    if (selectionBusy || !sessionId) return false;
+    const version = ++requestVersion.current;
+    setSelecting({ key, version });
+    setSelectionFailure(null);
     try {
       const next = await jsonFetch<Results>(`/api/control/media/assistant/sessions/${encodeURIComponent(sessionId!)}/results/selection`, {
         method: 'POST', body: JSON.stringify({ run_id: item.run_id, artifact_id: item.artifact_id, version: item.version, selected }),
       });
-      if (activeKey.current !== key) return false;
+      if (activeKey.current !== key || requestVersion.current !== version) return false;
       setState((current) => ({ ...current, error: undefined, selectionBindings: next.selected_result_bindings, data: current.data ? { ...current.data, selected_artifact_ids: next.selected_artifact_ids, selected_result_bindings: next.selected_result_bindings } : undefined }));
       return true;
     } catch (failure) {
-      if (activeKey.current === key) setState((current) => ({ ...current, error: (failure as Error).message }));
+      if (activeKey.current === key && requestVersion.current === version) setSelectionFailure({ key, item, selected, detail: (failure as Error).message });
       return false;
-    } finally { setSelecting(null); }
+    } finally { setSelecting(current => current?.version === version ? null : current); }
   }
   return {
-    data, error, select, runId, loaded: state.key === key && state.loaded,
+    data, error, select, runId,
+    selectionFailure: selectionFailure?.key === key ? selectionFailure : null,
+    retrySelection: async () => {
+      if (!selectionFailure || selectionFailure.key !== key) return false;
+      const item = state.key === key ? state.items?.find(item => item.artifact_id === selectionFailure.item.artifact_id && item.run_id === selectionFailure.item.run_id && item.version === selectionFailure.item.version) : undefined;
+      return item && (!selectionFailure.selected || item.available) ? select(item, selectionFailure.selected) : false;
+    }, loaded: state.key === key && state.loaded,
     selectionBindings: state.key === key ? state.selectionBindings ?? {} : {}, items: state.key === key ? state.items ?? [] : [],
-    resultErrors: state.key === key ? state.resultErrors ?? {} : {}, busy: Boolean(selecting), visible: Boolean(sessionId && runId),
+    resultErrors: state.key === key ? state.resultErrors ?? {} : {}, busy: selectionBusy, visible: Boolean(sessionId && runId),
     status: runStatus ?? data?.status,
     active: ['queued', 'pending', 'running'].includes(runStatus ?? data?.status ?? ''),
     selectedItems: (state.key === key ? state.items ?? [] : []).filter((item) => data?.selected_artifact_ids.includes(item.artifact_id)),
@@ -113,6 +131,20 @@ export function useAssistantResults({ sessionId, runId, runStatus, workspaceKey,
 }
 
 type ResultController = ReturnType<typeof useAssistantResults>;
+
+function AssistantSelectionRecovery({ results, disabled, onAsk }: { results: ResultController; disabled: boolean; onAsk?: () => void }) {
+  const failure = results.selectionFailure;
+  if (!failure) return null;
+  return <div className="graph-assistant-card-actions">
+    <p role="alert">{failure.selected
+      ? 'Couldn’t confirm this media selection. Check the media in this conversation, then retry the selection. Nothing will regenerate.'
+      : 'Couldn’t confirm that this media was removed from the conversation. Check the media in this conversation, then retry the removal. The media file will stay saved.'}</p>
+    <details><summary>Selection request details</summary><p>{failure.detail}</p></details>
+    <button type="button" disabled={disabled || results.busy} onClick={async () => { if (await results.retrySelection()) onAsk?.(); }}>
+      {failure.selected ? 'Retry media selection' : 'Retry removing media'}
+    </button>
+  </div>;
+}
 
 export function AssistantResults({ results, workflow, reviewingRun = false, disabled, onOpenPreview, onAsk }: {
   workflow: GraphWorkflowPayload;
@@ -154,12 +186,13 @@ export function AssistantResults({ results, workflow, reviewingRun = false, disa
       : results.status === 'failed' ? (reviewingRun ? 'Previous run failed' : 'Generation failed')
       : ['cancelled', 'canceled'].includes(results.status ?? '') ? 'Generation stopped'
       : 'Loading results…'}</strong>
-    {results.runId ? <details><summary>Run details</summary><p>Run: <code>{results.runId}</code></p></details> : null}
+    {results.runId ? <details><summary>Run details</summary><p>Run: <code>{results.runId}</code></p>{data?.error ? <p>{data.error}</p> : null}</details> : null}
     {reviewingRun && ['completed', 'failed', 'cancelled', 'canceled'].includes(results.status ?? '') ? <p>This outcome belongs to a previous run. The current run review below is a separate request.</p> : null}
-    {data?.error ? <p role="alert">{data.error}</p> : null}
+    {data?.error ? <p role="alert">This run did not finish successfully. Review the graph and run details before preparing another run.</p> : null}
     {completed && outputs.length > 0 ? <p>Choose Use in chat, then ask a question or describe a change.</p> : null}
     {completed && outputs.length === 0 ? <p>No new output to show. See the graph for details.</p> : null}
-    {error ? <div className="graph-assistant-card-actions"><p role="alert">{error}</p><button type="button" disabled={results.busy || disabled} onClick={results.retry}>Try loading results again</button></div> : null}
+    {error ? <div className="graph-assistant-card-actions"><p role="alert">Couldn’t load these results. Try loading them again. No new run will start.</p><details><summary>Result request details</summary><p>{error}</p></details><button type="button" disabled={results.busy || disabled} onClick={results.retry}>Try loading results again</button></div> : null}
+    {results.selectionFailure?.selected && results.selectionFailure.item.run_id === results.runId ? <AssistantSelectionRecovery results={results} disabled={disabled} onAsk={onAsk} /> : null}
     {completed ? outputs.map((item, index) => {
       const selected = data.selected_artifact_ids.includes(item.artifact_id);
       return <AssistantResultCard key={item.artifact_id} item={item} index={index} selected={selected}
@@ -206,6 +239,8 @@ export function AssistantRequestedResult({ binding, results, disabled, onAsk, on
   }
   const selectedBinding = results.selectionBindings[item.artifact_id];
   return <section aria-label="Requested image">
+    {results.selectionFailure?.selected && results.selectionFailure.item.artifact_id === item.artifact_id && results.selectionFailure.item.run_id === item.run_id && results.selectionFailure.item.version === item.version
+      ? <AssistantSelectionRecovery results={results} disabled={disabled} onAsk={onAsk} /> : null}
     <AssistantResultCard item={item} selected={selectedBinding?.run_id === item.run_id && selectedBinding.version === item.version}
       disabled={disabled || results.busy} onSelect={(value) => results.select(value, true)} onAsk={onAsk} onOpenPreview={onOpenPreview} />
   </section>;
@@ -214,9 +249,10 @@ export function AssistantRequestedResult({ binding, results, disabled, onAsk, on
 export function AssistantResultAttachments({ results, disabled, onOpenPreview }: {
   results: ResultController; disabled: boolean; onOpenPreview?: (preview: GraphMediaPreview) => void;
 }) {
-  if (results.active || !results.selectedItems.length) return null;
+  if (results.active || (!results.selectedItems.length && results.selectionFailure?.selected !== false)) return null;
   return <section className="graph-assistant-result-attachments" aria-label="Media in this conversation">
     <p>In this conversation · {results.selectedItems.length}</p>
+    {results.selectionFailure && !results.selectionFailure.selected ? <AssistantSelectionRecovery results={results} disabled={disabled} /> : null}
     <div className="graph-assistant-result-attachment-list">
       {results.selectedItems.map((item) => <div className="graph-assistant-result-attachment" key={item.artifact_id}>
         {item.available && item.url && item.media_type === 'image' ? <button type="button" className="graph-assistant-result-thumbnail"
