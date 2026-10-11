@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { StrictMode } from "react";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -163,6 +164,16 @@ describe("MediaPresetEditorScreen", () => {
     expect(screen.getByDisplayValue("Persisted Editorial Portrait")).toBeTruthy();
     expect(screen.getByDisplayValue("Create a cinematic portrait of {{subject}}.")).toBeTruthy();
     expect(screen.getByDisplayValue("Subject")).toBeTruthy();
+  });
+
+  it("asks for a fresh Media Preset draft when its saved assistant session is missing", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ detail: "Assistant session not found." }, { status: 404 }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<StrictMode><MediaPresetEditorScreen models={models} presets={[]} initialAssistantSessionId="missing-session" initialAssistantMessageId="message-1" /></StrictMode>);
+    expect(await screen.findByText("The assistant Media Preset draft is no longer available. Ask the assistant to create it again.")).toBeTruthy();
+    expect(screen.queryByText(/Check your connection and reload this page/)).toBeNull();
+    expect(pushMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledWith("/api/control/media/assistant/sessions/missing-session", { cache: "no-store" });
   });
 
   it("offers reload recovery when the assistant draft could not be reached", async () => {

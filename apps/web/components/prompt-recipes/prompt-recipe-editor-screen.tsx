@@ -190,7 +190,6 @@ export function PromptRecipeEditorScreen({
     if (loadedAssistantDraftRef.current || selectedRecipe) {
       return;
     }
-    loadedAssistantDraftRef.current = true;
     if (!initialAssistantDraftId && (!initialAssistantSessionId || !initialAssistantMessageId)) {
       loadedAssistantDraftRef.current = false;
       return;
@@ -209,6 +208,7 @@ export function PromptRecipeEditorScreen({
         reviewDraft = readAssistantReviewDraft(initialAssistantDraftId, "prompt_recipe");
       }
       if (cancelled) return;
+      loadedAssistantDraftRef.current = true;
       if (!reviewDraft || reviewDraft.kind !== "prompt_recipe") {
         setMessage({ tone: "danger", text: loadFailed ? "Couldn’t load your assistant Prompt Recipe draft. Check your connection and reload this page." : "The assistant Prompt Recipe draft is no longer available. Ask the assistant to create it again." });
         return;

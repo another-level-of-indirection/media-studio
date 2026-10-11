@@ -105,7 +105,6 @@ export function MediaPresetEditorScreen({
     if (loadedAssistantDraftRef.current || selectedPreset) {
       return;
     }
-    loadedAssistantDraftRef.current = true;
     if (!initialAssistantDraftId && (!initialAssistantSessionId || !initialAssistantMessageId)) {
       loadedAssistantDraftRef.current = false;
       return;
@@ -124,6 +123,7 @@ export function MediaPresetEditorScreen({
         reviewDraft = readAssistantReviewDraft(initialAssistantDraftId, "media_preset");
       }
       if (cancelled) return;
+      loadedAssistantDraftRef.current = true;
       if (!reviewDraft || reviewDraft.kind !== "media_preset") {
         showNotice("danger", loadFailed ? "Couldn’t load your assistant Media Preset draft. Check your connection and reload this page." : "The assistant Media Preset draft is no longer available. Ask the assistant to create it again.");
         return;

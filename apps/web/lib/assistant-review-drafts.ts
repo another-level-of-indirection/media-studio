@@ -85,6 +85,7 @@ export async function fetchAssistantReviewDraft(
   const response = await fetch(`/api/control/media/assistant/sessions/${encodeURIComponent(sessionId)}`, {
     cache: "no-store",
   });
+  if (response.status === 404) return null;
   if (!response.ok) {
     throw new Error("Unable to load assistant review draft.");
   }

@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { StrictMode } from "react";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -217,6 +218,16 @@ describe("PromptRecipeEditorScreen", () => {
     expect(screen.getByDisplayValue("persisted_character_director")).toBeTruthy();
     expect(screen.getByDisplayValue("Describe {{subject}} as a reusable character prompt.")).toBeTruthy();
     expect(screen.getByText("Review persisted draft before saving.")).toBeTruthy();
+  });
+
+  it("asks for a fresh Prompt Recipe draft when its saved assistant session is missing", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ detail: "Assistant session not found." }, { status: 404 }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<StrictMode><PromptRecipeEditorScreen recipes={[]} initialDraftingConfig={makeDraftingConfig()} initialAssistantSessionId="missing-session" initialAssistantMessageId="message-1" /></StrictMode>);
+    expect(await screen.findByText("The assistant Prompt Recipe draft is no longer available. Ask the assistant to create it again.")).toBeTruthy();
+    expect(screen.queryByText(/Check your connection and reload this page/)).toBeNull();
+    expect(pushMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledWith("/api/control/media/assistant/sessions/missing-session", { cache: "no-store" });
   });
 
   it("offers reload recovery when the assistant draft could not be reached", async () => {
