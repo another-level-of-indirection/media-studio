@@ -1,5 +1,7 @@
 "use client";
 
+import { graphChangeCopy } from "../utils/graph-change-copy";
+
 import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
 
 import type { MediaReference } from "@/lib/types";
@@ -280,6 +282,8 @@ export function useCreativeAssistant({
   const [session, setSession] = useState<AssistantSession | null>(null);
   const [draft, setDraft] = useState("");
   const [plan, setPlan] = useState<AssistantPlanResponse | null>(null);
+  const [failedApplyPlanId, setFailedApplyPlanId] = useState<string | null>(null);
+  const [deliveredPlanId, setDeliveredPlanId] = useState<string | null>(null);
   const [status, setStatus] = useState<AssistantStatus>("idle");
   const [progress, setProgress] = useState<AssistantProgress | null>(null);
   const [progressUnavailable, setProgressUnavailable] = useState(false);
@@ -378,6 +382,8 @@ export function useCreativeAssistant({
     planWorkflowOverrideRef.current = null;
     setScopedSession(null);
     setPlan(null);
+    setDeliveredPlanId(null);
+    setFailedApplyPlanId(null);
     setDraft("");
     setError(null);
     setRunConfirmationNeedsRecheck(false);
@@ -944,13 +950,6 @@ export function useCreativeAssistant({
         }),
       });
       if (!ownsOperation()) return null;
-      setPlan({
-        ...planResponse,
-        plan: result.plan,
-        workflow: result.workflow,
-        validation: result.validation,
-        pricing: result.pricing,
-      });
       const previousNodeIds = new Set(applyWorkflow.nodes.map((node) => node.id));
       const updatedNodeIds = new Set(
         (planResponse.graph_plan.operations ?? [])
@@ -969,10 +968,20 @@ export function useCreativeAssistant({
         assistantSessionId: planResponse.plan.assistant_session_id,
       });
       if (!ownsOperation()) return null;
-      onEvent?.("Assistant plan applied to the canvas.", "success");
+      setPlan({
+        ...planResponse,
+        plan: result.plan,
+        workflow: result.workflow,
+        validation: result.validation,
+        pricing: result.pricing,
+      });
+      setDeliveredPlanId(result.plan.assistant_plan_id);
+      setFailedApplyPlanId(null);
+      onEvent?.(graphChangeCopy({ ...planResponse, workflow: result.workflow }, true).copy, "success");
       return result;
     } catch (requestError) {
       if (!ownsOperation()) return null;
+      setFailedApplyPlanId(planResponse.plan.assistant_plan_id);
       const message = assistantErrorMessage(requestError, "Unable to apply assistant plan.");
       setError(message);
       onEvent?.(message, "error");
@@ -1320,6 +1329,8 @@ export function useCreativeAssistant({
       draft,
       setDraft,
       plan,
+      deliveredPlanId,
+      failedApplyPlanId,
       progress,
       progressUnavailable,
       progressUpdatedAt,
@@ -1380,6 +1391,8 @@ export function useCreativeAssistant({
       runConfirmationBlocker,
       runSubmissionUncertain,
       plan,
+      deliveredPlanId,
+      failedApplyPlanId,
       progress,
       progressUnavailable,
       progressUpdatedAt,

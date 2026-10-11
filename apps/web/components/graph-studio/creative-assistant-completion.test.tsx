@@ -9,7 +9,9 @@ const proposal={assistant_message_id:"proposal",role:"assistant",content_text:"P
 function mount(messages:unknown[]){const current={...session,messages,latest_plan:plan};vi.stubGlobal("fetch",vi.fn((url:string)=>json(url.endsWith("/progress")?idle:url.endsWith("/session-1")?current:{ready:true})));return render(<CreativeAssistantPanel open workspaceKey="completion" initialAssistantSessionId="session-1" workflowId="workflow-1" workflowName="Graph" workflow={workflow} references={[]} importImageFile={vi.fn()} onApplyWorkflow={vi.fn()} onClose={vi.fn()}/>);}
 it("keeps the graph's specific completion summary and puts repeated tool activity in secondary details",async()=>{
  mount([proposal]);await act(async()=>Promise.resolve());
- expect(screen.getByRole("region",{name:"Graph review"}).textContent).toContain(plan.graph_plan.summary);
+ expect(screen.getByText(plan.graph_plan.summary)).toBeTruthy();
+ expect(screen.getByRole("region",{name:"Graph review"}).textContent).toContain("Prepared for review: Add nodes");
+ expect(screen.getByRole("group",{name:"Assistant context"})).toBeTruthy();
  expect(screen.queryByRole("status",{name:"Assistant tool activity"})).toBeNull();
  expect(screen.getByRole("button",{name:"Add to canvas"})).toBeTruthy();
 });

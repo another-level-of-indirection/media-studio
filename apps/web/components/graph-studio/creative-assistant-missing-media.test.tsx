@@ -72,7 +72,7 @@ it.each([
     expect(view.getByText("Choose media for Product photo before running this graph.")).toBeTruthy();
   } else {
     expect(view.queryByRole("list", { name: "Graph review errors" })).toBeNull();
-    expect(view.getByText("Graph ready")).toBeTruthy();
+    expect(view.getByText("Graph additions prepared")).toBeTruthy();
   }
 });
 

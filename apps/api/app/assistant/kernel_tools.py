@@ -170,7 +170,7 @@ class DerivedRecipeDefaultsOverride(BaseModel):
 
 
 class ProposeGraphOperationsArguments(BaseModel):
-    summary: str = Field(min_length=1, max_length=800)
+    summary: str = Field(min_length=1, max_length=800, description="User-facing creative context for prepared changes. Describe the result and specific choices in ordinary language; never instructions to yourself or claims that unconfirmed changes were applied. Example: Rename to Dawn study; keep the warm lighting. Not: Prepare a fresh proposal and validate it.")
     operations: List[AssistantGraphOperation] = Field(default_factory=list, max_length=64)
     new_stage_name: Optional[str] = Field(default=None, min_length=1, max_length=160, description="Create a separate workflow and preserve the current graph. Use only when the user explicitly requests a separate workflow; continue in the current workflow by default.")
     reused_results: List[ResultReuse] = Field(default_factory=list, max_length=8, description="Exact selected outputs to materialize as loaders/text. Connect from their node_ref; do not reconstruct their content.")

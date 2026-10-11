@@ -1,5 +1,6 @@
 "use client";
 
+import { graphChangeCopy } from "./utils/graph-change-copy";
 import { assistantGraphContentIsOnCanvas } from "./utils/graph-assistant-canvas-state";
 import { AssistantMessageContent } from "./assistant-message-content";
 import { AssistantTurnOutcome } from "./assistant-turn-outcome";
@@ -354,9 +355,9 @@ function fieldUpdateLabels(operations: AssistantPlanResponse["graph_plan"]["oper
     .map((operation) => {
       const nodeId = String(operation["node_id"] || operation["node_ref"] || "").trim();
       const nodeTitle = nodeTitles.get(nodeId) || nodeId || "Selected node";
-      if (operation["op"] === "set_node_title") return `${nodeTitle}: title`;
+      if (operation["op"] === "set_node_title") return `${nodeTitle}: title → ${String(operation["title"] || "")}`;
       const fields = operation["fields"];
-      const fieldNames = fields && typeof fields === "object" ? Object.keys(fields as Record<string, unknown>) : [];
+      const fieldNames = fields && typeof fields === "object" ? Object.entries(fields as Record<string, unknown>).map(([key, value]) => `${key.replace(/_/g, " ")} → ${typeof value === "string" ? value : JSON.stringify(value)}`) : [];
       return fieldNames.length ? `${nodeTitle}: ${fieldNames.join(", ")}` : `${nodeTitle}: fields`;
     })
     .filter(Boolean);
@@ -524,59 +525,21 @@ function planHasOptionalEmptyMedia(plan: AssistantPlanResponse | null | undefine
   );
 }
 
-function planReviewTitle({
-  appliedPresetWorkflow,
-  planApplied,
-  noCanvasChanges,
-  valid,
-  missingMedia = false,
-  onlyFieldUpdates = false,
-  onlyLayoutUpdates = false,
-}: {
-  appliedPresetWorkflow: boolean;
-  planApplied: boolean;
-  noCanvasChanges: boolean;
-  valid: boolean;
-  missingMedia?: boolean;
-  onlyFieldUpdates?: boolean;
-  onlyLayoutUpdates?: boolean;
-}) {
-  if (appliedPresetWorkflow) return "Test graph ready";
-  if (missingMedia) return "Choose missing media";
-  if (planApplied && onlyLayoutUpdates) return "Workflow layout updated";
-  if (planApplied && onlyFieldUpdates) return "Node updated";
-  if (planApplied) return "Graph added";
-  if (noCanvasChanges) return "I need one thing first";
-  if (onlyLayoutUpdates) return valid ? "Workflow layout ready" : "Workflow layout needs review";
-  return valid ? "Graph ready" : "Graph needs review";
-}
-
 function noCanvasChangeSummary(plan: AssistantPlanResponse) {
-  const templateId = typeof plan.graph_plan.metadata?.["template_id"] === "string" ? plan.graph_plan.metadata["template_id"] : "";
-  if (templateId === "story_clip_combine_guard_v1") {
+  if (plan.graph_plan.metadata?.template_id === "story_clip_combine_guard_v1") {
     return "I need at least two approved clips before I can stitch them. Approve the clips you want, then I can build the combine graph.";
   }
-  return plan.graph_plan.summary.trim() || "Nothing needs to change on the canvas yet.";
+  return "No canvas changes are prepared. Review any questions or requirements below.";
 }
 
-function graphPlanPrimaryCopy(plan: AssistantPlanResponse, options: { missingMedia: boolean; onlyFieldUpdates: boolean; onlyLayoutUpdates: boolean }) {
-  const { missingMedia, onlyFieldUpdates, onlyLayoutUpdates } = options;
-  if (onlyLayoutUpdates) {
-    return plan.graph_plan.summary.trim() || "I prepared a geometry-only workflow layout for review.";
-  }
-  if (onlyFieldUpdates) {
-    return plan.graph_plan.summary.trim() || "The requested settings are prepared for review.";
-  }
-  if (missingMedia) {
-    const count = graphReviewErrors(plan).filter(isMissingMediaIssue).length;
-    return count === 1
-      ? "1 required media input needs a file before this graph can run."
-      : `${count} required media inputs need files before this graph can run.`;
-  }
-  if (plan.validation.valid) {
-    return plan.graph_plan.summary.trim() || "A graph proposal is prepared for review. Applying it remains a separate action.";
-  }
-  return plan.graph_plan.summary.trim() || "I found something to review before this graph is added.";
+// Keep stored creative specifics available without making arbitrary planning prose the outcome.
+function GraphAuthoredContext({ summary }: { summary: string }) {
+  const [expanded, setExpanded] = useState(false);
+  if (!summary.trim()) return null;
+  return <details onToggle={event => setExpanded(event.currentTarget.open)} aria-label="Assistant context">
+    <summary>Assistant context</summary>
+    {expanded ? <AssistantMessageContent text={summary} /> : null}
+  </details>;
 }
 
 export function CreativeAssistantPanel({
@@ -806,11 +769,13 @@ export function CreativeAssistantPanel({
 
   const plan = assistant.plan;
   const planOperations = plan?.graph_plan.operations ?? [];
+  const changeCopy = plan ? graphChangeCopy(plan, plan.plan.status === "applied") : null;
+  const planApplyFailed = Boolean(plan && assistant.failedApplyPlanId === plan.plan.assistant_plan_id);
   const planMetadata = plan?.graph_plan.metadata ?? {};
   const arrangeOperations = planOperations.filter((operation) => operation["op"] === "arrange_workflow");
   const onlyArrangeOperations = arrangeOperations.length === 1 && planOperations.length === 1;
   const planConfirmationOnly = Boolean(plan?.plan.status === "applied" &&
-    (onlyArrangeOperations || !assistantGraphContentIsOnCanvas(plan.workflow, workflow)));
+    ((onlyArrangeOperations && assistant.deliveredPlanId !== plan.plan.assistant_plan_id) || !assistantGraphContentIsOnCanvas(plan.workflow, workflow)));
   const planApplied = plan?.plan.status === "applied" && !planConfirmationOnly;
   const layoutDiff = typeof planMetadata["diff_summary"] === "object" && planMetadata["diff_summary"] !== null
     ? planMetadata["diff_summary"] as Record<string, unknown>
@@ -833,24 +798,7 @@ export function CreativeAssistantPanel({
   const noCanvasChanges = Boolean(plan && planOperationCount === 0);
   const planMissingMedia = planHasMissingMedia(plan);
   const planOptionalEmptyMedia = planHasOptionalEmptyMedia(plan);
-  const planStatusLabel = planApplied
-    ? onlyExecutionModeOperations ? "Execution mode updated" : onlyArrangeOperations ? "Layout applied" : "Added to canvas"
-    : plan && planOperationCount === 0
-      ? "No changes required"
-      : onlyArrangeOperations
-        ? "Ready to tidy"
-      : planMissingMedia
-        ? "Needs media"
-        : planOptionalEmptyMedia
-          ? "Optional media skipped"
-          : plan?.validation.valid
-            ? "Ready to add"
-            : "Needs review";
-  const kernelGraphAction =
-    assistant.nextAction?.kind === "confirm_graph" &&
-    assistant.nextAction.proposal_id === plan?.plan.assistant_plan_id
-      ? assistant.nextAction
-      : null;
+  const planStatusLabel = planApplyFailed ? "Needs a fresh review" : planMissingMedia ? "Needs media" : planOptionalEmptyMedia ? "Optional media skipped" : planApplied ? "Changes applied" : noCanvasChanges ? "No changes required" : plan?.validation.valid ? "Prepared for confirmation" : "Needs review";
   const presetSaveAction =
     assistant.nextAction?.kind === "save_media_preset" &&
     assistant.nextAction.requires_confirmation
@@ -876,9 +824,9 @@ export function CreativeAssistantPanel({
     assistant.nextAction?.kind === "run_workflow" && assistant.nextAction.requires_confirmation
       ? assistant.nextAction
       : null;
-  const planActionLabel = planMetadata.independent_stage ? "Open new workflow" : kernelGraphAction?.label || (planMissingMedia ? "Add graph to choose media" : "Add graph");
-  const planActionAriaLabel = planMetadata.independent_stage ? planActionLabel : kernelGraphAction?.label || (planMissingMedia ? "Add graph to choose media" : "Add reviewed graph");
-  const planActionTitle = planMetadata.independent_stage ? planActionLabel : kernelGraphAction?.label || (planMissingMedia ? "Add the graph so you can choose the missing media on the canvas" : "Add the reviewed graph");
+  const planActionLabel = changeCopy?.action ?? "Apply changes";
+  const planActionAriaLabel = planActionLabel;
+  const planActionTitle = planActionLabel;
   const pricing = assistantPlanPricingLabel(plan?.pricing.pricing_summary.total);
   const busyText = assistant.status === "idle" ? null
     : assistant.cancellable && assistant.status !== "cancelling"
@@ -949,7 +897,8 @@ export function CreativeAssistantPanel({
   const fieldUpdateOperations = planOperations.filter((operation) => operation["op"] === "set_node_field" || operation["op"] === "set_node_title");
   const onlyFieldUpdateOperations = fieldUpdateOperations.length > 0 && fieldUpdateOperations.length === planOperations.length;
   const selectedContext = selectedNodeContext(workflow, selectedNodeIds);
-  const appliedFieldUpdateLabels = onlyFieldUpdateOperations ? fieldUpdateLabels(fieldUpdateOperations, workflow) : [];
+  const appliedFieldUpdateLabels = fieldUpdateLabels(fieldUpdateOperations, workflow);
+  const reviewCanApply = !planApplyFailed && assistant.canApply && Boolean(plan && (plan.validation.valid || holdOnlyPlan || plan.validation.errors.every(isMissingMediaIssue)));
   const hasExplicitOperations = planOperations.length > 0;
   const attachReferenceFromPicker = async (referenceId: string) => {
     if (atImageLimit) {
@@ -1394,25 +1343,18 @@ export function CreativeAssistantPanel({
             >
             <div className="graph-assistant-plan-heading">
               {planApplied ? <CheckCircle2 size={15} /> : <Sparkles size={15} />}
-              <strong>{planApplied && onlyExecutionModeOperations ? "Execution mode updated" : planApplied && planMetadata.independent_stage ? "New workflow opened" : planReviewTitle({ appliedPresetWorkflow: presetTestReady, planApplied, noCanvasChanges, valid: plan.validation.valid, missingMedia: planMissingMedia, onlyFieldUpdates: onlyFieldUpdateOperations, onlyLayoutUpdates: onlyArrangeOperations })}</strong>
+              <strong>{planApplyFailed ? "Changes need a fresh review" : appliedPresetWorkflow && presetTestReady ? "Test graph ready" : changeCopy?.title}</strong>
               {!planApplied ? <small>{pricing}</small> : null}
             </div>
             <p>
-              {planApplied && onlyExecutionModeOperations
-                ? "Updated execution mode only. Nothing was run and no spending was approved."
-                : appliedPresetWorkflow
-                  ? appliedPresetNextStep
-                : planApplied && onlyArrangeOperations
-                  ? plan.graph_plan.summary.trim() || "The workflow layout is updated without changing graph content."
-                : planApplied && onlyFieldUpdateOperations
-                  ? plan.graph_plan.summary.trim() || "The requested settings are updated on the canvas."
-                : planApplied
-                  ? planMetadata.independent_stage ? "The new workflow is open in its own tab with this conversation. The previous workflow and its run are preserved." : "The confirmed graph changes are on the canvas. Applying them did not start a run."
-                  : noCanvasChanges
-                    ? noCanvasChangeSummary(plan)
-                    : graphPlanPrimaryCopy(plan, { missingMedia: planMissingMedia, onlyFieldUpdates: onlyFieldUpdateOperations, onlyLayoutUpdates: onlyArrangeOperations })}
+              {planApplyFailed ? "These changes could not be confirmed on the canvas. Ask for a fresh review before trying again." : appliedPresetWorkflow ? appliedPresetNextStep : noCanvasChanges ? noCanvasChangeSummary(plan) : changeCopy?.copy}
             </p>
-            {!planApplied && !noCanvasChanges && assistant.canApply ? (
+            {planMissingMedia ? <p>{graphReviewErrors(plan).filter(isMissingMediaIssue).length === 1
+              ? "1 required media input needs a file before this graph can run."
+              : `${graphReviewErrors(plan).filter(isMissingMediaIssue).length} required media inputs need files before this graph can run.`}</p> : null}
+            {planApplyFailed ? <button type="button" disabled={assistant.busy} onClick={() => void assistant.sendContentMessage("The last changes could not be confirmed. Inspect the current workflow and prepare a fresh proposal for those changes. Do not apply or run anything.")} aria-label="Review graph again">Review graph again</button> : null}
+            <GraphAuthoredContext key={plan.plan.assistant_plan_id} summary={plan.graph_plan.summary} />
+            {!planApplied && !noCanvasChanges && reviewCanApply ? (
               <p>Waiting for your confirmation. Choose {planActionLabel} to apply these changes. This does not start a run.</p>
             ) : null}
             {planApplied && onlyExecutionModeOperations ? (
@@ -1421,8 +1363,8 @@ export function CreativeAssistantPanel({
                 {!plan.validation.valid ? <p>Run remains blocked: {plan.validation.errors.map((issue) => graphReviewIssueCopy(plan, issue)).join(" ")}</p> : null}
               </div>
             ) : null}
-            {planApplied && onlyFieldUpdateOperations && appliedFieldUpdateLabels.length ? (
-              <p className="graph-assistant-edit-summary">Changed: {formatAssistantList(appliedFieldUpdateLabels)}</p>
+            {appliedFieldUpdateLabels.length ? (
+              <p className="graph-assistant-edit-summary">{planApplied ? "Changed" : "Proposed"}: {formatAssistantList(appliedFieldUpdateLabels)}</p>
             ) : null}
             {!planApplied && !noCanvasChanges ? (
               <details className="graph-assistant-plan-details" aria-label="Graph review details">
@@ -1494,7 +1436,7 @@ export function CreativeAssistantPanel({
                   ) : inPlaceEditOperations.length ? (
                     <span>Review changes to the current workflow below.</span>
                   ) : (
-                    <span>No canvas changes are required.</span>
+                    <span>Review the workflow changes described above.</span>
                   )}
                 </div>
                 {editChanges.length ? (
@@ -1561,14 +1503,15 @@ export function CreativeAssistantPanel({
                 </button>
               </div>
             ) : null}
+            {noCanvasChanges ? plan.graph_plan.questions.map((question, index) => <p key={index}>{question}</p>) : null}
             {!planApplied && !noCanvasChanges && !hasExplicitOperations && plan.graph_plan.questions.length ? <p className="graph-assistant-warning">{plan.graph_plan.questions[0]}</p> : null}
             {!planApplied && !noCanvasChanges && !hasExplicitOperations && !plan.validation.errors.length && plan.graph_plan.warnings.length ? <p className="graph-assistant-warning">{graphPlanWarningCopy(plan.graph_plan.warnings[0])}</p> : null}
-            {!planApplied && plan.validation.errors.length ? (
+            {plan.validation.errors.length ? (
               <ul className="graph-assistant-error" aria-label="Graph review errors">
                 {graphReviewErrors(plan).map((issue, index) => <li key={index}>{graphReviewIssueCopy(plan, issue)}</li>)}
               </ul>
             ) : null}
-            {!planApplied && hasExplicitOperations && assistant.canApply ? (
+            {!planApplied && hasExplicitOperations && reviewCanApply ? (
               <div className="graph-assistant-card-actions">
                 <button
                   type="button"

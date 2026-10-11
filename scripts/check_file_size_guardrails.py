@@ -94,9 +94,11 @@ GUARDRAILS = (
 # in the existing ephemeral progress owner; no persisted state or new execution authority.
 # Failure/completion: +36 reviewed lines persist outcomes in existing request JSON,
 # supply typed terminal summaries and retain separate run assessment; exact cap, no reserve.
+# Graph outcome copy: operation-owned labels and terminal fallback reuse existing
+# confirmation/persistence boundaries; measured source cap, no reserve.
 ASSISTANT_PACKAGE_GUARDRAIL = PackageGuardrail(
     "apps/api/app/assistant",
-    13_002,
+    13_069,
     "Media Assistant Python source package; reviewed candidate cap",
 )
 
