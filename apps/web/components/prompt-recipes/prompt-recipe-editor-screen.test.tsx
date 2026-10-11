@@ -271,15 +271,28 @@ describe("PromptRecipeEditorScreen", () => {
     );
   });
 
-  it.each(["Prompt recipe drafting provider returned invalid JSON.", "Drafting model returned an invalid recipe draft: System prompt template is required."])("explains an unusable generated draft and retains optional diagnostics: %s", async (error) => {
+  it.each([
+    ["Prompt recipe drafting provider returned invalid JSON.", "Couldn’t prepare a usable Prompt Recipe draft. Try again, or check the recipe draft model in AI Settings."],
+    ["Drafting model returned an invalid recipe draft: System prompt template is required.", "Couldn’t prepare a usable Prompt Recipe draft. Try again, or check the recipe draft model in AI Settings."],
+    ["Control API returned 503 for /prompt-recipes/draft.", "Couldn’t prepare a usable Prompt Recipe draft. Try again, or check the recipe draft model in AI Settings."],
+    ["The Control API is unavailable right now.", "Couldn’t prepare your Prompt Recipe draft. Check your connection and try again."],
+    ["openrouter recipe draft failed with 503.", "Couldn’t prepare a usable Prompt Recipe draft. Try again, or check the recipe draft model in AI Settings."],
+    ["local_openai_compatible recipe draft failed with 502.", "Couldn’t prepare a usable Prompt Recipe draft. Try again, or check the recipe draft model in AI Settings."],
+    ["codex_local recipe draft failed with 503.", "Couldn’t prepare a usable Prompt Recipe draft. Try again, or check the recipe draft model in AI Settings."],
+    ["Save a recipe draft model in AI Settings before drafting.", "Save a recipe draft model in AI Settings before drafting."],
+  ])("preserves draft failure guidance and optional diagnostics: %s", async (error, expected) => {
     vi.stubGlobal("fetch", buildEditorFetchMock({ draftResponse: { ok: false, error, draft: null } }));
     render(<PromptRecipeEditorScreen recipes={[]} initialDraftingConfig={makeDraftingConfig()} />);
     fireEvent.change(screen.getByLabelText("Recipe idea"), { target: { value: "Preserve warm amber light." } });
     fireEvent.click(screen.getByRole("button", { name: /generate draft/i }));
-    expect(await screen.findByText("Couldn’t prepare a usable Prompt Recipe draft. Try again, or check the recipe draft model in AI Settings.")).toBeTruthy();
-    const details = screen.getByText("Draft failure details").closest("details");
-    expect(details?.hasAttribute("open")).toBe(false);
-    expect(details?.textContent).toContain(error);
+    expect(await screen.findByText(expected)).toBeTruthy();
+    if (error !== expected) {
+      const details = screen.getByText("Draft failure details").closest("details");
+      expect(details?.hasAttribute("open")).toBe(false);
+      expect(details?.textContent).toContain(error);
+    } else {
+      expect(screen.queryByText("Draft failure details")).toBeNull();
+    }
     expect(screen.getByDisplayValue("Preserve warm amber light.")).toBeTruthy();
     expect(screen.queryByText("Draft generated. Review the fields and save when ready.")).toBeNull();
   });

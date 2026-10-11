@@ -633,6 +633,16 @@ export function useCreativeAssistant({
     }
   }, [onEvent]);
 
+  const reportArtifactSaveFailure = useCallback((requestError: unknown, artifactKind: "media_preset" | "prompt_recipe") => {
+    const [label, list] = artifactKind === "media_preset" ? ["Media Preset", "preset"] : ["Prompt Recipe", "recipe"];
+    const errorMessage = requestError instanceof JsonFetchError
+      ? assistantErrorMessage(requestError, `Couldn’t save your ${label}. Review the draft and try again.`)
+      : `Couldn’t confirm whether your ${label} was saved. Check the ${list} list before trying again.`;
+    setError(errorMessage);
+    onEvent?.(errorMessage, "error");
+    return null;
+  }, [onEvent]);
+
   const saveMediaPresetFromMessage = useCallback(async (
     message: string,
     assistantSessionId?: string | null,
@@ -670,16 +680,11 @@ export function useCreativeAssistant({
         reportAbortableStop("Media Preset save stopped.");
         return null;
       }
-      const errorMessage = requestError instanceof JsonFetchError
-        ? assistantErrorMessage(requestError, "Couldn’t save your Media Preset. Review the draft and try again.")
-        : "Couldn’t confirm whether your Media Preset was saved. Check the preset list before trying again.";
-      setError(errorMessage);
-      onEvent?.(errorMessage, "error");
-      return null;
+      return reportArtifactSaveFailure(requestError, "media_preset");
     } finally {
       finishAbortableOperation();
     }
-  }, [assistantMode, ensureSession, finishAbortableOperation, latestRunId, onEvent, refreshDefinitionsAfterAssistantSave, reportAbortableStop, runAbortableRequest, session, setScopedSession, workflow]);
+  }, [assistantMode, ensureSession, finishAbortableOperation, latestRunId, onEvent, refreshDefinitionsAfterAssistantSave, reportAbortableStop, reportArtifactSaveFailure, runAbortableRequest, session, setScopedSession, workflow]);
 
   const confirmPresetSave = useCallback(async () => {
     if (
@@ -734,16 +739,11 @@ export function useCreativeAssistant({
         reportAbortableStop("Prompt Recipe save stopped.");
         return null;
       }
-      const errorMessage = requestError instanceof JsonFetchError
-        ? assistantErrorMessage(requestError, "Couldn’t save your Prompt Recipe. Review the draft and try again.")
-        : "Couldn’t confirm whether your Prompt Recipe was saved. Check the recipe list before trying again.";
-      setError(errorMessage);
-      onEvent?.(errorMessage, "error");
-      return null;
+      return reportArtifactSaveFailure(requestError, "prompt_recipe");
     } finally {
       finishAbortableOperation();
     }
-  }, [assistantMode, ensureSession, finishAbortableOperation, latestRunId, onEvent, refreshDefinitionsAfterAssistantSave, reportAbortableStop, runAbortableRequest, session, setScopedSession, workflow]);
+  }, [assistantMode, ensureSession, finishAbortableOperation, latestRunId, onEvent, refreshDefinitionsAfterAssistantSave, reportAbortableStop, reportArtifactSaveFailure, runAbortableRequest, session, setScopedSession, workflow]);
 
   const confirmRecipeSave = useCallback(async () => {
     if (

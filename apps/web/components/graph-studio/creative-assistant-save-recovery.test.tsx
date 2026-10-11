@@ -8,12 +8,16 @@ import { assistantIdleProgress, assistantSessionResponse, assistantJsonResponse 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 it.each([
-  ["Media Preset", "save_media_preset", "preset-saves", "kernel_preset_proposal", "preset list"],
-  ["Prompt Recipe", "save_prompt_recipe", "recipe-saves", "kernel_recipe_proposal", "recipe list"],
-])("keeps %s confirmation after a connection failure and retries the same approved draft", async (label, kind, endpoint, proposalKey, list) => {
+  { label: "Media Preset", kind: "save_media_preset", endpoint: "preset-saves", proposalKey: "kernel_preset_proposal", list: "preset list" },
+  { label: "Prompt Recipe", kind: "save_prompt_recipe", endpoint: "recipe-saves", proposalKey: "kernel_recipe_proposal", list: "recipe list" },
+].flatMap(product => ["connection", "rejection"].map(failure => ({ ...product, failure }))))(
+  "keeps $label confirmation after a $failure failure and retries the same approved draft",
+  async ({ label, kind, endpoint, proposalKey, list, failure }) => {
   const message = { assistant_message_id: "review", assistant_session_id: "session-1", role: "assistant", content_text: `${label} draft prepared for review. This draft has not been saved.`,
     content_json: { mode: "assistant_kernel", next_action: { kind, label: "Save draft", proposal_id: "exact-proposal", confirmation_token: "exact-token", requires_confirmation: true,
       payload: { proposal_id: "exact-proposal", confirmation_token: "exact-token", save_mode: "verified", quality_state: "quality_verified" } } } };
+  const onEvent = vi.fn();
+  const rejectedMessage = "Choose a subject image before saving.";
   let attempted = false;
   const fetchMock = vi.fn((url: string) => {
     if (url.endsWith("/progress")) return jsonResponse(assistantIdleProgress);
@@ -21,7 +25,12 @@ it.each([
     if (url.endsWith("/media/assistant/sessions")) return jsonResponse({...session, messages:[]});
     if (url.endsWith("/messages")) return jsonResponse({...session, messages:[message], summary_json:{[proposalKey]:{proposal_id:"exact-proposal",consumed:false}}});
     if (url.endsWith(`/${endpoint}`)) {
-      if (!attempted) { attempted = true; return Promise.reject(new TypeError("Failed to fetch")); }
+      if (!attempted) {
+        attempted = true;
+        return failure === "connection"
+          ? Promise.reject(new TypeError("Failed to fetch"))
+          : Promise.resolve(Response.json({ detail: rejectedMessage }, { status: 422 }));
+      }
       return jsonResponse({message:`${label} saved.`, assistant_session:{...session, messages:[message], summary_json:{[proposalKey]:{proposal_id:"exact-proposal",consumed:true}}}});
     }
     if (url.endsWith("/session-1")) return assistantSessionResponse(url, session);
@@ -30,13 +39,17 @@ it.each([
   vi.stubGlobal("fetch", fetchMock);
   vi.stubGlobal("localStorage", {getItem:()=>null,setItem:()=>undefined});
   render(<CreativeAssistantPanel open workspaceKey="save-recovery" workflowId="workflow-1" workflowName="Review" workflow={workflow} references={[]}
-    importImageFile={vi.fn()} onApplyWorkflow={vi.fn()} onClose={vi.fn()} />);
+    importImageFile={vi.fn()} onApplyWorkflow={vi.fn()} onClose={vi.fn()} onEvent={onEvent} />);
   fireEvent.change(screen.getByRole("textbox", {name:/assistant message/i}), {target:{value:`Save this ${label}.`}});
   await act(async()=>Promise.resolve());
   fireEvent.click(screen.getByRole("button",{name:/send chat message/i}));
   const buttonName = `Save confirmed ${label}`;
   fireEvent.click(await screen.findByRole("button",{name:buttonName}));
-  expect(await screen.findByText(`Couldn’t confirm whether your ${label} was saved. Check the ${list} before trying again.`)).toBeTruthy();
+  const expectedMessage = failure === "connection"
+    ? `Couldn’t confirm whether your ${label} was saved. Check the ${list} before trying again.`
+    : rejectedMessage;
+  expect(await screen.findByText(expectedMessage)).toBeTruthy();
+  expect(onEvent).toHaveBeenCalledWith(expectedMessage, "error");
   expect(screen.queryByText(`${label} saved.`)).toBeNull();
   fireEvent.click(screen.getByRole("button",{name:buttonName}));
   await waitFor(()=>expect(screen.queryByRole("button",{name:buttonName})).toBeNull());
