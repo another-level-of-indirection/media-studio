@@ -183,7 +183,7 @@ export function StudioEnhanceDialog({
                 type="button"
                 data-testid="studio-enhance-use-prompt-button"
                 onClick={onUsePrompt}
-                disabled={!enhancedPrompt}
+                disabled={busy || Boolean(error) || !enhancedPrompt}
                 variant="subtle"
                 className="h-auto w-full gap-3 rounded-[20px] px-5 py-4 text-sm font-semibold"
               >

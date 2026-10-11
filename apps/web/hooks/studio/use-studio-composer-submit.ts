@@ -13,6 +13,8 @@ import {
   type StructuredPresetImageSlot,
 } from "@/lib/media-studio-helpers";
 import { normalizeImageFileForUpload } from "@/lib/studio-composer-file-utils";
+import { studioDebug } from "@/lib/studio-debug";
+import { enhancementFailureMessage } from "@/lib/studio-enhancement";
 import { createOptimisticBatch } from "@/lib/studio-gallery";
 import type {
   MediaBatch,
@@ -230,6 +232,7 @@ export function useStudioComposerSubmit(options: UseStudioComposerSubmitOptions)
     }
     options.setEnhanceDialogOpen(true);
     options.setEnhanceBusy(true);
+    options.setEnhancePreview(null);
     options.setEnhanceError(null);
     options.showActivity({ tone: "warning", message: "Building the enhancement preview.", spinning: true });
     const controller = new AbortController();
@@ -242,7 +245,8 @@ export function useStudioComposerSubmit(options: UseStudioComposerSubmitOptions)
       });
       const payload = (await response.json()) as { ok: false; error?: string } | { ok: true; preview?: MediaEnhancePreviewResponse };
       if (!response.ok || !payload.ok) {
-        const errorMessage = "error" in payload ? payload.error ?? "Unable to enhance the prompt." : "Unable to enhance the prompt.";
+        studioDebug("enhancement", { status: response.status, error: "error" in payload ? payload.error : undefined });
+        const errorMessage = enhancementFailureMessage("error" in payload ? payload.error : undefined);
         options.setEnhancePreview(null);
         options.setEnhanceError(errorMessage);
         options.showActivity({ tone: "danger", message: errorMessage }, { autoHideMs: 4200 });
@@ -255,7 +259,7 @@ export function useStudioComposerSubmit(options: UseStudioComposerSubmitOptions)
       const errorMessage =
         error instanceof DOMException && error.name === "AbortError"
           ? "Enhancement timed out. Check the provider in Settings and try again."
-          : "Studio could not reach the enhancement preview route.";
+          : "Couldn’t enhance your prompt. Check your connection and try again.";
       options.setEnhanceError(errorMessage);
       options.showActivity({ tone: "danger", message: errorMessage }, { autoHideMs: 4200 });
     } finally {
