@@ -496,6 +496,16 @@ function graphReviewIssueCopy(plan: AssistantPlanResponse, issue: GraphError) {
   return issue.message;
 }
 
+function graphReviewErrors(plan: AssistantPlanResponse) {
+  const missingInputIds = new Set<string>();
+  return plan.validation.errors.filter((issue) => {
+    if (!isMissingMediaIssue(issue) || !issue.node_id) return true;
+    if (missingInputIds.has(issue.node_id)) return false;
+    missingInputIds.add(issue.node_id);
+    return true;
+  });
+}
+
 function graphPlanWarningCopy(warning: string) {
   if (isOptionalEmptyMediaIssue(warning)) {
     return "One optional media input is empty. It will be skipped unless you add media.";
@@ -558,7 +568,10 @@ function graphPlanPrimaryCopy(plan: AssistantPlanResponse, options: { missingMed
     return plan.graph_plan.summary.trim() || "The requested settings are prepared for review.";
   }
   if (missingMedia) {
-    return "I can build this graph, but one required media input needs a file before it can run.";
+    const count = graphReviewErrors(plan).filter(isMissingMediaIssue).length;
+    return count === 1
+      ? "1 required media input needs a file before this graph can run."
+      : `${count} required media inputs need files before this graph can run.`;
   }
   if (plan.validation.valid) {
     return plan.graph_plan.summary.trim() || "A graph proposal is prepared for review. Applying it remains a separate action.";
@@ -1550,7 +1563,11 @@ export function CreativeAssistantPanel({
             ) : null}
             {!planApplied && !noCanvasChanges && !hasExplicitOperations && plan.graph_plan.questions.length ? <p className="graph-assistant-warning">{plan.graph_plan.questions[0]}</p> : null}
             {!planApplied && !noCanvasChanges && !hasExplicitOperations && !plan.validation.errors.length && plan.graph_plan.warnings.length ? <p className="graph-assistant-warning">{graphPlanWarningCopy(plan.graph_plan.warnings[0])}</p> : null}
-            {!planApplied && plan.validation.errors.length ? <p className="graph-assistant-error">{graphReviewIssueCopy(plan, plan.validation.errors[0])}</p> : null}
+            {!planApplied && plan.validation.errors.length ? (
+              <ul className="graph-assistant-error" aria-label="Graph review errors">
+                {graphReviewErrors(plan).map((issue, index) => <li key={index}>{graphReviewIssueCopy(plan, issue)}</li>)}
+              </ul>
+            ) : null}
             {!planApplied && hasExplicitOperations && assistant.canApply ? (
               <div className="graph-assistant-card-actions">
                 <button
