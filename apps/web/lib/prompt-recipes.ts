@@ -396,3 +396,17 @@ export function promptRecipeToDraft(recipe: Partial<PromptRecipe> | PromptRecipe
 }
 
 export type PromptRecipeEditorDraft = ReturnType<typeof promptRecipeToDraft>;
+
+// Only normalize known provider/transport failures; keep field and setup guidance intact.
+export function promptRecipeDraftFailureMessage(message?: string) {
+  if (!message || message.startsWith("Control API returned ") ||
+      message.startsWith("Prompt recipe drafting provider ") ||
+      message.startsWith("Drafting model returned an invalid recipe draft:") ||
+      /^(openrouter|local_openai_compatible|codex_local) .* failed with \d+\./.test(message)) {
+    return "Couldn’t prepare a usable Prompt Recipe draft. Try again, or check the recipe draft model in AI Settings.";
+  }
+  if (message === "The Control API is unavailable right now.") {
+    return "Couldn’t prepare your Prompt Recipe draft. Check your connection and try again.";
+  }
+  return message;
+}

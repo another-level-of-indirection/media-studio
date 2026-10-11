@@ -77,6 +77,7 @@ export function MediaPresetEditorScreen({
   const defaultModelKey = initialModelKey ?? selectedPreset?.model_key ?? "nano-banana-2";
   const [presetForm, setPresetForm] = useState<PresetFormState>(() => buildPresetForm(selectedPreset, defaultModelKey));
   const [isSaving, setIsSaving] = useState(false);
+  const [assistantWarnings, setAssistantWarnings] = useState<string[]>([]);
   const [isExporting, setIsExporting] = useState(false);
   const { notice: message, showNotice } = useAdminActionNotice();
   const presetNameInputRef = useRef<HTMLInputElement | null>(null);
@@ -113,20 +114,22 @@ export function MediaPresetEditorScreen({
     let cancelled = false;
     async function loadAssistantDraft() {
       let reviewDraft: AssistantReviewDraft | null = null;
+      let loadFailed = false;
       try {
         reviewDraft = await fetchAssistantReviewDraft(initialAssistantSessionId, initialAssistantMessageId, "media_preset");
       } catch {
-        reviewDraft = null;
+        loadFailed = true;
       }
       if (!reviewDraft && initialAssistantDraftId) {
         reviewDraft = readAssistantReviewDraft(initialAssistantDraftId, "media_preset");
       }
       if (cancelled) return;
       if (!reviewDraft || reviewDraft.kind !== "media_preset") {
-        showNotice("danger", "The assistant Media Preset draft is no longer available. Ask the assistant to create it again.");
+        showNotice("danger", loadFailed ? "Couldn’t load your assistant Media Preset draft. Check your connection and reload this page." : "The assistant Media Preset draft is no longer available. Ask the assistant to create it again.");
         return;
       }
       setPresetForm(buildPresetForm(reviewDraft.draft, defaultModelKey));
+      setAssistantWarnings(reviewDraft.validationWarnings);
       showNotice("healthy", "Assistant Media Preset draft loaded. Review the fields and save when ready.");
       clearAssistantReviewDraft(initialAssistantDraftId);
     }
@@ -194,22 +197,31 @@ export function MediaPresetEditorScreen({
       ? `/api/control/media-presets/${presetForm.presetId}`
       : "/api/control/media-presets";
     const method = presetForm.presetId ? "PATCH" : "POST";
-    const response = await fetch(endpoint, {
-      method,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    const result = (await response.json()) as { ok?: boolean; error?: string; preset?: MediaPreset };
-    if (!response.ok || result.ok === false || !result.preset) {
+    try {
+      const response = await fetch(endpoint, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const result = (await response.json()) as { ok?: boolean; error?: string; preset?: MediaPreset };
+      if (!response.ok || result.ok === false || !result.preset) {
+        showNotice("danger", result.error ?? "Couldn’t save your Media Preset. Review its fields and try again.");
+        return;
+      }
+      setPresetForm(buildPresetForm(result.preset, defaultModelKey));
+      try {
+        await invalidateGraphNodeDefinitions(presetForm.presetId ? "media-preset-updated" : "media-preset-created");
+      } catch {
+        showNotice("danger", "Media Preset saved. Reload the page to refresh the Graph node list.");
+        return;
+      }
+      showNotice("healthy", presetForm.presetId ? "Preset updated." : "Preset created.");
+      router.push(returnToPresetsHref);
+    } catch {
+      showNotice("danger", "Couldn’t confirm whether your Media Preset was saved. Check the preset list before trying again.");
+    } finally {
       setIsSaving(false);
-      showNotice("danger", result.error ?? "Unable to save the preset.");
-      return;
     }
-    await invalidateGraphNodeDefinitions(presetForm.presetId ? "media-preset-updated" : "media-preset-created");
-    setPresetForm(buildPresetForm(result.preset, defaultModelKey));
-    setIsSaving(false);
-    showNotice("healthy", presetForm.presetId ? "Preset updated." : "Preset created.");
-    router.push(returnToPresetsHref);
   }
 
   async function exportPreset() {
@@ -266,6 +278,10 @@ export function MediaPresetEditorScreen({
   return (
     <div className="space-y-7">
       {message ? <AdminActionNotice tone={message.tone} text={message.text} /> : null}
+      {assistantWarnings.length ? <section aria-label="Assistant draft review" className="callout-panel callout-panel-warning">
+        <strong>Review before saving or testing</strong>
+        <ul>{assistantWarnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul>
+      </section> : null}
 
       <Panel>
         <PanelHeader

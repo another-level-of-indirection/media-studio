@@ -208,6 +208,7 @@ class CommunicationTests(unittest.TestCase):
                 self.assertIn(label, result.reply)
                 self.assertIn('Dawn review', result.reply)
                 self.assertIn('not been saved', result.reply)
+                self.assertIn('Review its fields before saving.', result.reply)
                 self.assertEqual(result.trace.step_count, 1)
 
     def test_old_graph_proposal_is_not_reissued_for_a_new_advice_turn(self):

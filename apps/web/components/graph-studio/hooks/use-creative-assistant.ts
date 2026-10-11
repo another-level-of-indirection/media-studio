@@ -670,7 +670,9 @@ export function useCreativeAssistant({
         reportAbortableStop("Media Preset save stopped.");
         return null;
       }
-      const errorMessage = assistantErrorMessage(requestError, "Unable to save Media Preset.");
+      const errorMessage = requestError instanceof JsonFetchError
+        ? assistantErrorMessage(requestError, "Couldn’t save your Media Preset. Review the draft and try again.")
+        : "Couldn’t confirm whether your Media Preset was saved. Check the preset list before trying again.";
       setError(errorMessage);
       onEvent?.(errorMessage, "error");
       return null;
@@ -732,7 +734,9 @@ export function useCreativeAssistant({
         reportAbortableStop("Prompt Recipe save stopped.");
         return null;
       }
-      const errorMessage = assistantErrorMessage(requestError, "Unable to save Prompt Recipe.");
+      const errorMessage = requestError instanceof JsonFetchError
+        ? assistantErrorMessage(requestError, "Couldn’t save your Prompt Recipe. Review the draft and try again.")
+        : "Couldn’t confirm whether your Prompt Recipe was saved. Check the recipe list before trying again.";
       setError(errorMessage);
       onEvent?.(errorMessage, "error");
       return null;

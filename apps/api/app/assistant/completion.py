@@ -39,7 +39,7 @@ def terminal_artifact_reply(kind: str | None, result: dict[str, Any]) -> str:
         draft = result.get("draft") or {}
         name = str(draft.get("label") or draft.get("title") or "").strip()
         artifact = "Media Preset" if kind == "preset_draft" else "Prompt Recipe"
-        return f"{artifact}{' ‘' + name + '’' if name else ''} draft prepared for review. This draft has not been saved."
+        return f"{artifact}{' ‘' + name + '’' if name else ''} draft prepared for review. This draft has not been saved. Review its fields before saving."
     if kind == "recipe_continuation":
         return "A Prompt Recipe is needed before this graph can be prepared. Review the continuation choice."
     return ""
