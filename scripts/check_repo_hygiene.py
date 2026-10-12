@@ -34,10 +34,11 @@ BLOCKED_SUFFIXES = (
     ".p12",
 )
 BLOCKED_PREFIXES = (
-    "data/uploads/",
-    "data/downloads/",
-    "data/outputs/",
-    "data/backups/",
+    "data/",
+    ".scratch/",
+    ".direnv/",
+    "docs/agents/",
+    "docs/engineering/",
     "docs/development/",
     "docs/reviews/",
     "artifacts/",
@@ -45,10 +46,12 @@ BLOCKED_PREFIXES = (
     "tmp/",
     "temp/",
     "output/",
+    "outputs/",
     "test-results/",
     "playwright-report/",
 )
 BLOCKED_EXACT = {
+    "AGENTS.md",
     "docs/API_SECURITY_FULL_REPORT.md",
     "docs/review-remediation-plan.md",
     "scripts/audit_api_security.py",
@@ -62,11 +65,12 @@ ALLOWED_EXACT = {
 def is_blocked(rel_path: str) -> bool:
     if rel_path in ALLOWED_EXACT:
         return False
-    if rel_path in BLOCKED_PATTERNS:
+    filename = rel_path.rsplit("/", 1)[-1]
+    if filename in BLOCKED_PATTERNS:
         return True
-    if rel_path in BLOCKED_EXACT:
+    if rel_path in BLOCKED_EXACT or filename == "AGENTS.md":
         return True
-    if rel_path.startswith(".env.") and rel_path != ".env.example":
+    if filename.startswith(".env.") and filename != ".env.example":
         return True
     if any(rel_path.startswith(prefix) for prefix in BLOCKED_PREFIXES):
         return True

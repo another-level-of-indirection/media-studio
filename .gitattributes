@@ -6,3 +6,29 @@ docs/review-remediation-plan.md export-ignore
 .DS_Store export-ignore
 docs/.DS_Store export-ignore
 tmp-graph-studio.png export-ignore
+
+# Private local state stays out of archives even if accidentally force-added.
+AGENTS.md export-ignore
+docs/agents/ export-ignore
+docs/engineering/ export-ignore
+.scratch/ export-ignore
+.playwright-cli/ export-ignore
+.direnv/ export-ignore
+artifacts/ export-ignore
+data/ export-ignore
+logs/ export-ignore
+tmp/ export-ignore
+temp/ export-ignore
+output/ export-ignore
+outputs/ export-ignore
+test-results/ export-ignore
+playwright-report/ export-ignore
+.env export-ignore
+.env.* export-ignore
+.env.example -export-ignore
+.envrc export-ignore
+*.pem export-ignore
+*.key export-ignore
+*.crt export-ignore
+*.cer export-ignore
+*.p12 export-ignore

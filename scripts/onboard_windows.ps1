@@ -20,6 +20,14 @@ function Require-Command {
   }
 }
 
+function Assert-NativeCommandSucceeded {
+  param([string]$Step, [int]$ExitCode)
+
+  if ($ExitCode -ne 0) {
+    throw "${Step} failed (exit code $ExitCode). Correct the error above and rerun onboarding."
+  }
+}
+
 function Ensure-EnvFile {
   if (Test-Path $EnvFile) {
     return
@@ -155,6 +163,7 @@ function Configure-CodexLocalDefaults {
   $env:MEDIA_STUDIO_DATA_ROOT = Get-EnvValue "MEDIA_STUDIO_DATA_ROOT"
   $env:MEDIA_STUDIO_KIE_API_REPO_PATH = $KieRoot
   & $VenvPy (Join-Path $ScriptDir "configure_codex_local_defaults.py") $MediaRoot
+  Assert-NativeCommandSucceeded "Configuring Codex Local defaults" $LASTEXITCODE
 }
 
 function Start-DevWindow {
@@ -188,22 +197,31 @@ Write-Host ""
 if ((-not (Test-Path (Join-Path $KieRoot ".git"))) -and (-not (Test-Path (Join-Path $KieRoot "pyproject.toml")))) {
   Write-Host "Cloning KIE API repo from $KieRepoUrl ..."
   git clone $KieRepoUrl $KieRoot
+  Assert-NativeCommandSucceeded "Cloning KIE API" $LASTEXITCODE
 }
 
 if (-not (Test-Path $VenvPy)) {
   Write-Host "Creating shared KIE virtualenv ..."
   python -m venv (Join-Path $KieRoot ".venv")
+  Assert-NativeCommandSucceeded "Creating the Python environment" $LASTEXITCODE
 }
 
 Write-Host "Installing shared Python dependencies ..."
 & $VenvPip install --upgrade pip setuptools wheel
+Assert-NativeCommandSucceeded "Installing Python packaging tools" $LASTEXITCODE
 & $VenvPip install -e $KieRoot
+Assert-NativeCommandSucceeded "Installing KIE API dependencies" $LASTEXITCODE
 & $VenvPip install -e (Join-Path $MediaRoot "apps\api")
+Assert-NativeCommandSucceeded "Installing Media Studio API dependencies" $LASTEXITCODE
 
 Write-Host "Installing web dependencies ..."
 Push-Location $MediaRoot
-npm install --include=dev --no-fund --no-audit
-Pop-Location
+try {
+  npm install --include=dev --no-fund --no-audit
+  Assert-NativeCommandSucceeded "Installing web dependencies" $LASTEXITCODE
+} finally {
+  Pop-Location
+}
 
 New-Item -ItemType Directory -Force -Path (Join-Path $MediaRoot "data") | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $MediaRoot "data\uploads") | Out-Null
@@ -235,6 +253,7 @@ store.bootstrap_schema()
 print("Schema ready at:", os.environ["MEDIA_STUDIO_DB_PATH"])
 '@
 $bootstrapScript | & $VenvPy -
+Assert-NativeCommandSucceeded "Bootstrapping the database schema" $LASTEXITCODE
 
 Write-Host ""
 Write-Host "Live image and video generation requires a KIE API key."

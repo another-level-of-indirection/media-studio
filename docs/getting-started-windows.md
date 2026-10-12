@@ -35,6 +35,8 @@ The script will:
 - create a clean local SQLite database with schema and default presets
 - prompt for your KIE API key and optional prompt-enhancement providers
 
+If cloning, dependency installation, schema setup, or AI-provider configuration fails, onboarding stops with the failed step and its exit code. Correct that error and rerun the same command. The script reuses existing configuration; it does not report readiness or launch the app after a failed step.
+
 Before a public release, validate this flow on a real Windows machine with a clean clone, a fresh `.env`, and a new local database.
 
 ## 4. Add the required KIE API key

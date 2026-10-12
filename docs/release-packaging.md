@@ -30,6 +30,10 @@ These docs are intended to be safe for public release after final review:
 
 These files are local development notes, audit artifacts, or generated reports. They should not be treated as release docs or marketing material:
 
+- `AGENTS.md`
+- `docs/agents/`
+- `docs/engineering/`
+- `.scratch/`
 - `docs/development/`
 - `docs/reviews/`
 - `docs/API_SECURITY_FULL_REPORT.md`
@@ -43,7 +47,7 @@ The repo ignores development notes and generated artifacts by default. `.gitattr
 
 Before publishing a public repository or source archive:
 
-- Replace the early MIT license with the intended distribution license.
+- Complete distribution review for the current `LICENSE` and `ADDITIONAL_TERMS.md`.
 - Confirm the README license section matches `LICENSE` and `package.json`.
 - Run repo hygiene checks so local secrets, databases, logs, review outputs, and generated media are not tracked.
 - Confirm macOS, Linux, and Windows setup docs tell the same provider story: KIE is required for generation; Codex Local, OpenRouter, and Local OpenAI-compatible providers are optional prompt providers.
