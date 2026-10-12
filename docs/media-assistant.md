@@ -172,6 +172,10 @@ Immediately disable the per-install flag and stop the pilot after any unconfirme
 
 Meeting this checklist does not change the default feature gate. Default exposure is a separate human release decision.
 
+## Historical acceptance record
+
+The dated checkpoints below retain their original test counts, budgets, failures and evidence limits. Later fixes supersede earlier implementation status; historical failures are not automatically current bugs, and passing automated CI does not close unverified creative acceptance. Use the behavior sections above and later explicitly dated behavior updates together with the [documentation map](README.md).
+
 ## Pilot decision — 2026-08-24
 
 **NO-GO.** Keep the Assistant behind the existing per-install opt-in. Runtime candidate `86ded2ab5635ae96509278283be9b7fd28439093` does not meet the latency, token, provider-step, availability, or complete-proof criteria above.
