@@ -51,6 +51,9 @@ data/backups/
 .playwright-cli/
 artifacts/
 docs/reviews/
+docs/agents/
+docs/engineering/
+.scratch/
 docs/development/
 docs/API_SECURITY_FULL_REPORT.md
 docs/review-remediation-plan.md
