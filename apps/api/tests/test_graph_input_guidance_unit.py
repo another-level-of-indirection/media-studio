@@ -3,13 +3,14 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from app.graph.registry import registry
-from app.graph.schemas import GraphWorkflow
-from app.graph.validator import validate_workflow
-
 
 class PresetInputGuidanceTests(unittest.TestCase):
     def test_required_preset_inputs_name_the_visible_fields_and_node_without_changing_identifiers(self):
+        # Fixture-driven app reloads must not leave this test holding collection-time owners.
+        from app.graph.registry import registry
+        from app.graph.schemas import GraphWorkflow
+        from app.graph.validator import validate_workflow
+
         preset = {"preset_id": "preset-1", "key": "amber", "label": "Amber preset", "status": "active", "model_key": "model-1",
                   "input_schema_json": [{"key": "scene_desc", "label": "Scene description", "required": True}],
                   "input_slots_json": [{"key": "image_1", "label": "Product photo", "required": True, "max_files": 1}]}

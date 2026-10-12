@@ -1389,7 +1389,7 @@ def test_kernel_graph_proposal_is_validated_priced_and_confirmable(client, monke
     assert len(applied.json()["workflow"]["nodes"]) == 1
 
 
-def test_kernel_layout_proposal_uses_tidy_workflow_confirmation_label(app_modules) -> None:
+def test_kernel_layout_confirmation_label_uses_recorded_operations(app_modules) -> None:
     del app_modules
     kernel = importlib.import_module("app.assistant.kernel")
     schemas = importlib.import_module("app.assistant.schemas")
@@ -1403,6 +1403,7 @@ def test_kernel_layout_proposal_uses_tidy_workflow_confirmation_label(app_module
                     "proposal_id": "asplan-layout",
                     "confirmation_token": "confirm-layout",
                     "action_metadata": {"arrange_workflow": True},
+                    "operations": [{"op": "arrange_workflow"}],
                     "pricing": {},
                 },
             )
@@ -1411,6 +1412,17 @@ def test_kernel_layout_proposal_uses_tidy_workflow_confirmation_label(app_module
 
     assert action.kind == "confirm_graph"
     assert action.label == "Tidy workflow"
+
+
+    # A planning hint without a recorded layout operation cannot promise a tidy.
+    metadata_only = schemas.AssistantKernelArtifact(
+        kind="graph_proposal",
+        data={"proposal_id": "asplan-metadata", "confirmation_token": "confirm-metadata",
+              "action_metadata": {"arrange_workflow": True}, "pricing": {}},
+    )
+    fallback = kernel._next_action_for_artifacts("graph_builder", [metadata_only])
+    assert fallback.kind == "confirm_graph"
+    assert fallback.label == "Apply changes"
 
 
 def test_kernel_layout_noop_has_no_confirmation_action(app_modules) -> None:
