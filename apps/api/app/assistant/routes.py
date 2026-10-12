@@ -349,7 +349,7 @@ def apply_plan(
             {
                 "assistant_session_id": session["assistant_session_id"],
                 "role": "system_summary",
-                "content_text": "Applied the confirmed graph proposal without running it.",
+                "content_text": "Graph changes confirmed. Check the canvas before continuing; confirmation did not start a run.",
                 "content_json": {
                     "plan_id": plan_id,
                     "activity_kind": "graph_plan_applied",

@@ -20,6 +20,8 @@ export function useMediaImagePickerPagination<T>({
   const [loadingMore, setLoadingMore] = useState(false);
   const [nextOffset, setNextOffset] = useState<number | null>(0);
   const [open, setOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [failedAppend, setFailedAppend] = useState(false);
 
   const mergeItems = useCallback(
     (current: T[], next: T[]) => {
@@ -39,11 +41,14 @@ export function useMediaImagePickerPagination<T>({
         setLoading(true);
         setNextOffset(null);
       }
+      setError(null);
       try {
         const page = await fetchPage(append ? offset ?? 0 : 0);
         setItems((current) => (append ? mergeItems(current, page.items) : page.items));
         setNextOffset(page.nextOffset);
       } catch (error) {
+        setError(error instanceof Error ? error.message : "Unable to load images.");
+        setFailedAppend(append);
         onError?.(error instanceof Error ? error.message : "Unable to load images.");
       } finally {
         if (append) {
@@ -82,6 +87,8 @@ export function useMediaImagePickerPagination<T>({
     setItems,
     loading,
     loadingMore,
+    error,
+    retry: () => loadPage({ append: failedAppend }),
     nextOffset,
     openPicker,
     closePicker,

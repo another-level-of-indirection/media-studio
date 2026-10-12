@@ -114,7 +114,7 @@ it.each(["success", "failure", "return-to-A", "canvas-completion"])("keeps late 
   fireEvent.click(applyButton);
   await waitFor(() => expect(fetch.mock.calls.some(([url]) => url.endsWith("/apply"))).toBe(true));
   if (outcome === "canvas-completion") {
-    await act(async () => { applying.resolve(await json(plan)); });
+    await act(async () => { applying.resolve(await json({ ...plan, plan: { ...plan.plan, status: "applied" } })); });
     await waitFor(() => expect(apply).toHaveBeenCalledOnce());
   }
   monitoring = true;

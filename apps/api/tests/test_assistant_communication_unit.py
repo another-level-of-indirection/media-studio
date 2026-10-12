@@ -119,11 +119,84 @@ class CommunicationTests(unittest.TestCase):
 
     def test_missing_graph_reply_names_the_typed_proposal_without_an_extra_provider_call(self):
         result = self.run_turn({'capability': 'graph_builder', 'artifact_intent': 'none', 'tool_call': {'name': 'propose_graph_operations', 'arguments': '{}'}},
-            execution=self.execution('propose_graph_operations', {'proposal_id': 'exact', 'confirmation_token': 'token', 'summary': 'Rename only Shot 03.', 'operations': [{'op': 'set_node_title'}]}))
-        self.assertIn('Rename only Shot 03.', result.reply)
+            execution=self.execution('propose_graph_operations', {'proposal_id': 'exact', 'confirmation_token': 'token', 'summary': 'Rename only Shot 03.', 'operations': [{'op': 'set_node_title', 'title': 'Shot 03'}]}))
+        self.assertIn('node settings or titles', result.reply)
         self.assertIn('review', result.reply)
-        self.assertNotIn('applied', result.reply.lower())
+        self.assertIn('have not been applied', result.reply.lower())
         self.assertEqual(result.trace.step_count, 1)
+
+    def test_rename_fallback_uses_operation_facts_and_exact_action(self):
+        instruction = "Prepare a fresh rename-only proposal from the current graph, freshly validating it and preserving both current media selections, all nodes, connections, and prompt. Do not apply or run."
+        result = self.run_turn({'capability': 'graph_builder', 'artifact_intent': 'none', 'tool_call': {'name': 'propose_graph_operations', 'arguments': '{}'}},
+            execution=self.execution('propose_graph_operations', {'proposal_id': 'exact', 'confirmation_token': 'token', 'summary': instruction, 'operations': [{'op': 'rename_workflow', 'title': 'Inputs supplied'}]}))
+        self.assertIn('Inputs supplied', result.reply)
+        self.assertIn('not changed yet', result.reply)
+        self.assertNotIn(instruction, result.reply)
+        self.assertEqual(result.next_action.label, 'Rename workflow')
+        self.assertEqual(result.trace.step_count, 1)
+
+    def test_graph_fallback_explains_each_effect_in_mixed_changes(self):
+        operations = [{'op': 'rename_workflow', 'title': 'Dawn'}, {'op': 'add_node', 'title': 'Warm lighting'}, {'op': 'set_node_field', 'fields': {'resolution': '2K'}}, {'op': 'arrange_workflow'}]
+        result = self.run_turn({'capability': 'graph_builder', 'artifact_intent': 'none', 'tool_call': {'name': 'propose_graph_operations', 'arguments': '{}'}},
+            execution=self.execution('propose_graph_operations', {'proposal_id': 'exact', 'confirmation_token': 'token', 'summary': 'Prepare this proposal; do not apply or run.', 'operations': operations, 'validation': {'valid': True, 'errors': []}}))
+        for effect in ('Dawn', 'add nodes', 'update node settings', 'arrange the workflow', 'Apply changes'):
+            self.assertIn(effect, result.reply)
+        self.assertNotIn('Prepare this proposal', result.reply)
+        self.assertEqual(result.next_action.label, 'Apply changes')
+
+    def test_terminal_graph_copy_handles_add_edit_layout_noop_and_blockers(self):
+        from app.assistant.completion import terminal_artifact_reply
+        for operations, action, effect in [
+            ([{'op': 'add_node', 'title': 'Warm lighting'}], 'Add to canvas', 'add nodes'),
+            ([{'op': 'set_node_field', 'fields': {'resolution': '2K'}}], 'Apply node changes', 'update node settings'),
+            ([{'op': 'arrange_workflow'}], 'Tidy workflow', 'arrange the workflow'),
+        ]:
+            with self.subTest(action=action):
+                copy = terminal_artifact_reply('graph_proposal', {'summary': 'Prepare a new proposal.', 'operations': operations})
+                self.assertIn(effect, copy)
+                self.assertIn(action, copy)
+                self.assertIn('have not been applied', copy)
+                self.assertNotIn('Prepare a new proposal.', copy)
+        copy = terminal_artifact_reply('graph_proposal', {'operations': [], 'summary': 'Everything applied.'})
+        self.assertIn('No canvas changes', copy)
+        self.assertNotIn('Choose', copy)
+        result = {'operations': [{'op': 'rename_workflow', 'title': 'Needs files'}], 'workflow': {'nodes': [
+            {'id': 'person', 'metadata': {'ui': {'customTitle': 'Person photo'}}},
+            {'id': 'product', 'metadata': {'ui': {'customTitle': 'Product photo'}}}]},
+            'validation': {'valid': False, 'errors': [
+                {'code': 'missing_media_reference', 'node_id': 'person'},
+                {'code': 'missing_media_reference', 'node_id': 'person'},
+                {'code': 'missing_media_reference', 'node_id': 'product'}]}}
+        copy = terminal_artifact_reply('graph_proposal', result)
+        self.assertEqual(copy.count('Choose media for Person photo'), 1)
+        self.assertEqual(copy.count('Choose media for Product photo'), 1)
+        self.assertIn('Choose Rename workflow', copy)
+        result['validation']['errors'].append({'code': 'missing_prompt', 'message': 'Add the advertising prompt.'})
+        copy = terminal_artifact_reply('graph_proposal', result)
+        self.assertIn('Add the advertising prompt.', copy)
+        self.assertNotIn('Choose Rename workflow', copy)
+        self.assertIn('before applying', copy)
+
+    def test_confirmable_hold_keeps_run_blockers_and_confirmation_action(self):
+        result = self.run_turn({'capability': 'graph_builder', 'artifact_intent': 'none', 'tool_call': {'name': 'propose_graph_operations', 'arguments': '{}'}},
+            execution=self.execution('propose_graph_operations', {'proposal_id': 'hold', 'confirmation_token': 'token',
+                'operations': [{'op': 'set_execution_mode', 'node_id': 'image', 'execution_mode': 'frozen'}],
+                'confirmable': True, 'validation': {'valid': False, 'errors': [{'code': 'missing_prompt', 'message': 'Add a prompt before running.'}]}}))
+        self.assertIn('Add a prompt before running.', result.reply)
+        self.assertIn('Choose Apply node changes to confirm.', result.reply)
+        self.assertNotIn('Review the requirements before applying.', result.reply)
+        self.assertEqual(result.next_action.label, 'Apply node changes')
+
+    def test_stored_missing_media_names_match_supported_review_labels(self):
+        from app.assistant.completion import terminal_artifact_reply
+        labels = [('metadata', key) for key in ('customTitle', 'custom_title', 'title', 'label')] + [('fields', key) for key in ('title', 'label', 'name')]
+        for container, key in labels:
+            with self.subTest(container=container, key=key):
+                node = {'id': 'technical-id', 'type': 'media.load_image', container: {'ui': {key: ' Person photo '}} if container == 'metadata' else {key: ' Person photo '}}
+                copy = terminal_artifact_reply('graph_proposal', {'operations': [{'op': 'rename_workflow', 'title': 'Stored graph'}],
+                    'workflow': {'nodes': [node]}, 'validation': {'valid': False, 'errors': [{'code': 'missing_media_reference', 'node_id': 'technical-id'}]}})
+                self.assertIn('Choose media for Person photo before running', copy)
+                self.assertNotIn('technical-id', copy)
 
     def test_missing_preset_and_recipe_replies_name_unsaved_typed_drafts(self):
         for name, kind, label in [('draft_preset', 'preset_draft', 'Media Preset'), ('draft_recipe', 'recipe_draft', 'Prompt Recipe')]:
@@ -135,6 +208,7 @@ class CommunicationTests(unittest.TestCase):
                 self.assertIn(label, result.reply)
                 self.assertIn('Dawn review', result.reply)
                 self.assertIn('not been saved', result.reply)
+                self.assertIn('Review its fields before saving.', result.reply)
                 self.assertEqual(result.trace.step_count, 1)
 
     def test_old_graph_proposal_is_not_reissued_for_a_new_advice_turn(self):

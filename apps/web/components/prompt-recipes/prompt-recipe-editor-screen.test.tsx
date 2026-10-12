@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { StrictMode } from "react";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -22,13 +23,6 @@ vi.mock("next/image", () => ({
     const { fill: _fill, ...rest } = props;
     return <img alt="" {...rest} />;
   },
-}));
-
-vi.mock("@/lib/graph-node-definitions-sync", () => ({
-  invalidateGraphNodeDefinitions: vi.fn().mockResolvedValue({
-    changedAt: "2026-05-18T00:00:00.000Z",
-    reason: "prompt-recipe-created",
-  }),
 }));
 
 function makeDraftingConfig(overrides: Partial<PromptRecipeDraftingConfig> = {}): PromptRecipeDraftingConfig {
@@ -138,11 +132,13 @@ describe("PromptRecipeEditorScreen", () => {
   beforeEach(() => {
     pushMock.mockReset();
     vi.restoreAllMocks();
+    vi.stubGlobal("localStorage", window.sessionStorage);
   });
 
   afterEach(() => {
     cleanup();
     window.sessionStorage.clear();
+    vi.unstubAllGlobals();
   });
 
   it("loads an assistant Prompt Recipe draft for review without saving it", async () => {
@@ -224,6 +220,26 @@ describe("PromptRecipeEditorScreen", () => {
     expect(screen.getByText("Review persisted draft before saving.")).toBeTruthy();
   });
 
+  it("asks for a fresh Prompt Recipe draft when its saved assistant session is missing", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ detail: "Assistant session not found." }, { status: 404 }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<StrictMode><PromptRecipeEditorScreen recipes={[]} initialDraftingConfig={makeDraftingConfig()} initialAssistantSessionId="missing-session" initialAssistantMessageId="message-1" /></StrictMode>);
+    expect(await screen.findByText("The assistant Prompt Recipe draft is no longer available. Ask the assistant to create it again.")).toBeTruthy();
+    expect(screen.queryByText(/Check your connection and reload this page/)).toBeNull();
+    expect(pushMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledWith("/api/control/media/assistant/sessions/missing-session", { cache: "no-store" });
+  });
+
+  it("offers reload recovery when the assistant draft could not be reached", async () => {
+    vi.stubGlobal("fetch", buildEditorFetchMock({ handle: async (url) => {
+      if (url.includes("/api/control/media/assistant/sessions/")) throw new TypeError("Failed to fetch");
+      return null;
+    } }));
+    render(<PromptRecipeEditorScreen recipes={[]} initialAssistantSessionId="session-1" initialAssistantMessageId="message-1" />);
+    expect(await screen.findByText("Couldn’t load your assistant Prompt Recipe draft. Check your connection and reload this page.")).toBeTruthy();
+    expect(pushMock).not.toHaveBeenCalled();
+  });
+
   it("generates a draft and renders server review warnings", async () => {
     const fetchMock = buildEditorFetchMock();
     vi.stubGlobal("fetch", fetchMock);
@@ -253,6 +269,55 @@ describe("PromptRecipeEditorScreen", () => {
         method: "POST",
       }),
     );
+  });
+
+  it.each([
+    ["Prompt recipe drafting provider returned invalid JSON.", "Couldn’t prepare a usable Prompt Recipe draft. Try again, or check the recipe draft model in AI Settings."],
+    ["Drafting model returned an invalid recipe draft: System prompt template is required.", "Couldn’t prepare a usable Prompt Recipe draft. Try again, or check the recipe draft model in AI Settings."],
+    ["Control API returned 503 for /prompt-recipes/draft.", "Couldn’t prepare a usable Prompt Recipe draft. Try again, or check the recipe draft model in AI Settings."],
+    ["The Control API is unavailable right now.", "Couldn’t prepare your Prompt Recipe draft. Check your connection and try again."],
+    ["openrouter recipe draft failed with 503.", "Couldn’t prepare a usable Prompt Recipe draft. Try again, or check the recipe draft model in AI Settings."],
+    ["local_openai_compatible recipe draft failed with 502.", "Couldn’t prepare a usable Prompt Recipe draft. Try again, or check the recipe draft model in AI Settings."],
+    ["codex_local recipe draft failed with 503.", "Couldn’t prepare a usable Prompt Recipe draft. Try again, or check the recipe draft model in AI Settings."],
+    ["Save a recipe draft model in AI Settings before drafting.", "Save a recipe draft model in AI Settings before drafting."],
+  ])("preserves draft failure guidance and optional diagnostics: %s", async (error, expected) => {
+    vi.stubGlobal("fetch", buildEditorFetchMock({ draftResponse: { ok: false, error, draft: null } }));
+    render(<PromptRecipeEditorScreen recipes={[]} initialDraftingConfig={makeDraftingConfig()} />);
+    fireEvent.change(screen.getByLabelText("Recipe idea"), { target: { value: "Preserve warm amber light." } });
+    fireEvent.click(screen.getByRole("button", { name: /generate draft/i }));
+    expect(await screen.findByText(expected)).toBeTruthy();
+    if (error !== expected) {
+      const details = screen.getByText("Draft failure details").closest("details");
+      expect(details?.hasAttribute("open")).toBe(false);
+      expect(details?.textContent).toContain(error);
+    } else {
+      expect(screen.queryByText("Draft failure details")).toBeNull();
+    }
+    expect(screen.getByDisplayValue("Preserve warm amber light.")).toBeTruthy();
+    expect(screen.queryByText("Draft generated. Review the fields and save when ready.")).toBeNull();
+  });
+
+  it("keeps the idea and draft after a drafting connection failure and recovers on retry", async () => {
+    let failed = false;
+    const fetchMock = buildEditorFetchMock({ handle: async (url) => {
+      if (url === "/api/control/prompt-recipes/draft" && !failed) {
+        failed = true;
+        throw new TypeError("Failed to fetch");
+      }
+      return null;
+    } });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<PromptRecipeEditorScreen recipes={[]} initialDraftingConfig={makeDraftingConfig()} />);
+    fireEvent.change(screen.getByLabelText("Recipe Name"), { target: { value: "Keep this draft" } });
+    fireEvent.change(screen.getByLabelText("Recipe idea"), { target: { value: "Keep warm amber light and 4:3 framing." } });
+    fireEvent.click(screen.getByRole("button", { name: /generate draft/i }));
+    expect(await screen.findByText("Couldn’t prepare your Prompt Recipe draft. Check your connection and try again.")).toBeTruthy();
+    expect(screen.getByDisplayValue("Keep this draft")).toBeTruthy();
+    expect(screen.getByDisplayValue("Keep warm amber light and 4:3 framing.")).toBeTruthy();
+    expect(pushMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: /generate draft/i }));
+    expect(await screen.findByText("Draft generated. Review the fields and save when ready.")).toBeTruthy();
+    expect(screen.getByDisplayValue("Generated Director")).toBeTruthy();
   });
 
   it("saves a new recipe and navigates back to the prompt recipes list", async () => {
@@ -293,6 +358,42 @@ describe("PromptRecipeEditorScreen", () => {
         method: "POST",
       }),
     );
+  });
+
+  it("keeps an unsaved recipe after an uncertain save and recovers without claiming completion", async () => {
+    let failed = false;
+    vi.stubGlobal("fetch", buildEditorFetchMock({ handle: async (url) => {
+      if (url === "/api/control/prompt-recipes") {
+        if (!failed) { failed = true; throw new TypeError("Failed to fetch"); }
+        return { ok: true, json: async () => ({ ok: true, recipe: { recipe_id: "saved-recipe", ...makeDraftPayload() } }) };
+      }
+      return null;
+    } }));
+    const id = writeAssistantReviewDraft({ kind: "prompt_recipe", draft: makeDraftPayload(), validationWarnings: [], mediaSummary: [] });
+    render(<PromptRecipeEditorScreen recipes={[]} initialAssistantDraftId={id} />);
+    await screen.findByText("Assistant Prompt Recipe draft loaded. Review the fields and save when ready.");
+    fireEvent.click(screen.getByRole("button", { name: /save prompt recipe/i }));
+    expect(await screen.findByText("Couldn’t confirm whether your Prompt Recipe was saved. Check the recipe list before trying again.")).toBeTruthy();
+    expect(screen.getByDisplayValue("Generated Director")).toBeTruthy();
+    expect(screen.getByDisplayValue(/USER:/)).toBeTruthy();
+    expect(screen.queryByText("Prompt recipe created.")).toBeNull();
+    expect(pushMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: /save prompt recipe/i }));
+    await waitFor(() => expect(pushMock).toHaveBeenCalledTimes(1));
+    expect(screen.getByText("Prompt recipe created.")).toBeTruthy();
+  });
+
+  it("reports a confirmed save truthfully when local Graph refresh fails", async () => {
+    vi.stubGlobal("fetch", buildEditorFetchMock({ handle: async (url) => url === "/api/control/prompt-recipes" ? {
+      ok: true, json: async () => ({ ok: true, recipe: { recipe_id: "saved-recipe", ...makeDraftPayload() } }),
+    } : null }));
+    render(<PromptRecipeEditorScreen recipes={[]} />);
+    fireEvent.change(screen.getByLabelText("Recipe Name"), { target: { value: "Generated Director" } });
+    vi.stubGlobal("localStorage", { setItem: () => { throw new DOMException("Quota exceeded", "QuotaExceededError"); } });
+    fireEvent.click(screen.getByRole("button", { name: /save prompt recipe/i }));
+    expect(await screen.findByText("Prompt Recipe saved. Reload the page to refresh the Graph node list.")).toBeTruthy();
+    expect(screen.queryByText(/Couldn’t confirm/)).toBeNull();
+    expect(pushMock).not.toHaveBeenCalled();
   });
 
   it("keeps advanced graph inputs and contracts collapsed by default and allows expanding them", () => {

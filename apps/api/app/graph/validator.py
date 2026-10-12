@@ -10,6 +10,7 @@ from .execution_cache import cached_artifacts_available, cached_output_for_node,
 from .normalization import materialize_workflow_defaults
 from .prompt_provider_defaults import studio_default_prompt_provider_config
 from .registry import registry
+from .prompt_recipe_catalog import title_from_key
 from .schemas import GraphError, GraphValidationResult, GraphWorkflow, GraphWorkflowEdge, GraphWorkflowNode
 from .validator_prompt_recipe import (
     validate_prompt_recipe_node_setup,
@@ -377,7 +378,7 @@ def validate_workflow(workflow: GraphWorkflow) -> GraphValidationResult:
                         errors.append(
                             GraphError(
                                 code="missing_preset_text",
-                                message=f"Missing required preset text field: {key}",
+                                message=f"Enter {field.get('label') or title_from_key(key)} for {_node_title(node) or preset.get('label') or 'this preset'} before running.",
                                 node_id=node.id,
                                 field_id=f"text__{_slug(key)}",
                             )
@@ -577,7 +578,7 @@ def validate_workflow(workflow: GraphWorkflow) -> GraphValidationResult:
                         errors.append(
                             GraphError(
                                 code="missing_preset_image_slot",
-                                message=f"Missing required preset image slot: {key}",
+                                message=f"Choose media for {slot.get('label') or title_from_key(key)} in {_node_title(node) or preset.get('label') or 'this preset'} before running.",
                                 node_id=node.id,
                                 port_id=port_id,
                             )

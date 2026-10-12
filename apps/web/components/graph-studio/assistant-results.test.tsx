@@ -40,7 +40,7 @@ it.each(['failed', 'cancelled'])('shows terminal %s without review controls', as
   vi.stubGlobal('fetch', vi.fn(async () => reply({ ...response, status, error: status === 'failed' ? 'Provider rejected the request.' : null })));
   render(<Harness status={status} />);
   expect(screen.getByText(status === 'failed' ? 'Generation failed' : 'Generation stopped')).toBeTruthy();
-  if (status === 'failed') expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Provider rejected the request.');
+  if (status === 'failed') { expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'This run did not finish successfully. Review the graph and run details before preparing another run.'); expect(screen.getByText('Provider rejected the request.').closest('details')).not.toBeNull(); }
   expect(screen.queryByRole('status')).toBeNull(); expect(screen.queryByRole('button', { name: /Use in chat/ })).toBeNull();
 });
 it('keeps polling failure separate from generation failure', async () => {
@@ -101,11 +101,25 @@ it('explains selection, shows its count, and removes context without deleting me
 it('identifies a failed run separately from a new run review without hiding its error', async () => {
   vi.stubGlobal('fetch', vi.fn(async () => reply({ ...response, status: 'failed', error: 'Earlier prompt rejected.' })));
   const view = render(<Harness status="failed" reviewingRun />);
-  expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Earlier prompt rejected.');
+  expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'This run did not finish successfully. Review the graph and run details before preparing another run.');
+  expect(screen.getByText('Earlier prompt rejected.').closest('details')).not.toBeNull();
   expect(screen.getByText('Previous run failed')).toBeTruthy();
   expect(screen.getByText('run-a')).toBeTruthy();
   expect(screen.queryByRole('button', { name: /Review and run/ })).toBeNull();
   view.rerender(<Harness status="failed" />);
   expect(screen.getByText('Generation failed')).toBeTruthy();
   expect(screen.queryByText(/current run review below/)).toBeNull();
+});
+
+it('keeps a terminal result retrieval failure separate from run failure and offers a non-generating retry',async()=>{
+ let offline=true;
+ const fetcher=vi.fn(async(_url:string,_init?:RequestInit)=>offline?new Response('Internal Server Error',{status:500}):reply(response));
+ vi.stubGlobal('fetch',fetcher);render(<Harness status="completed"/>);
+ expect(await screen.findByRole('alert')).toHaveProperty('textContent','Couldn’t load these results. Try loading them again. No new run will start.');
+ expect(screen.getByText('Request failed with 500').closest('details')).not.toBeNull();
+ expect(screen.queryByText('Generation failed')).toBeNull();
+ offline=false;fireEvent.click(screen.getByRole('button',{name:'Try loading results again'}));
+ expect(await screen.findByRole('button',{name:'Use in chat — Finished storyboard'})).toBeTruthy();
+ expect(screen.queryByRole('alert')).toBeNull();
+ expect(fetcher.mock.calls.every(([url,init])=>url.endsWith('/results') && !init?.method)).toBe(true);
 });

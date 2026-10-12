@@ -9,6 +9,12 @@ export class JsonFetchError extends Error {
   }
 }
 
+// Explicit client rejections can explain how to fix an input; transport/server failures cannot confirm persistence.
+export function requestRejectionMessage(error: unknown): string | null {
+  return error instanceof JsonFetchError && error.status !== null && error.status >= 400 && error.status < 500
+    && error.message !== `Request failed with ${error.status}` ? error.message : null;
+}
+
 export async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     ...init,

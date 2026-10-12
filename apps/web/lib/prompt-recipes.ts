@@ -1,3 +1,4 @@
+import { providerRequestFailureKind } from "@/lib/provider-request-failure";
 import type {
   PromptRecipe,
   PromptRecipeCategory,
@@ -396,3 +397,17 @@ export function promptRecipeToDraft(recipe: Partial<PromptRecipe> | PromptRecipe
 }
 
 export type PromptRecipeEditorDraft = ReturnType<typeof promptRecipeToDraft>;
+
+// Only normalize known provider/transport failures; keep field and setup guidance intact.
+export function promptRecipeDraftFailureMessage(message = "") {
+  const failure = providerRequestFailureKind(message);
+  if (failure === "connection") {
+    return "Couldn’t prepare your Prompt Recipe draft. Check your connection and try again.";
+  }
+  if (failure === "request" ||
+      message.startsWith("Prompt recipe drafting provider ") ||
+      message.startsWith("Drafting model returned an invalid recipe draft:")) {
+    return "Couldn’t prepare a usable Prompt Recipe draft. Try again, or check the recipe draft model in AI Settings.";
+  }
+  return message;
+}

@@ -10,6 +10,14 @@ The shortest way to think about it:
 - your own prompts, presets, queue, and outputs
 - pay-as-you-go model usage through Kie AI
 
+## Choose your workspace
+
+- **Studio:** image and video generation, presets, revisions and your local media library.
+- **Graph Studio (experimental):** reusable visual workflows across image, video, audio and prompt processing.
+- **Media Assistant (experimental):** help preparing and revising work inside Graph Studio, with separate confirmation for applying changes and starting generation.
+
+See the [product overview](README.md) and [documentation map](docs/README.md) for current guides and the distinction between implemented behavior and design proposals.
+
 ## What you need
 
 - `git`

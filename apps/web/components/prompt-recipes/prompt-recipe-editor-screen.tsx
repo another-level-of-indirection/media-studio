@@ -39,6 +39,7 @@ import {
   slugifyPromptRecipeKey,
   type PromptRecipeEditorDraft,
   promptRecipeDraftWarnings,
+  promptRecipeDraftFailureMessage,
   promptRecipeToDraft,
   validatePromptRecipeDraft,
 } from "@/lib/prompt-recipes";
@@ -106,6 +107,7 @@ export function PromptRecipeEditorScreen({
   const [isGeneratingDraft, setIsGeneratingDraft] = useState(false);
   const [isUploadingThumbnail, setIsUploadingThumbnail] = useState(false);
   const [message, setMessage] = useState<{ tone: "healthy" | "danger"; text: string } | null>(null);
+  const [draftFailureDetails, setDraftFailureDetails] = useState<string | null>(null);
   const [draftIdea, setDraftIdea] = useState("");
   const [lastDraftWarnings, setLastDraftWarnings] = useState<string[]>(
     () => selectedRecipe?.validation_warnings_json ?? selectedRecipe?.validation_warnings ?? [],
@@ -124,7 +126,6 @@ export function PromptRecipeEditorScreen({
   const thumbnailPicker = useMediaImagePickerPagination<MediaAssetPickerItem>({
     fetchPage: fetchGeneratedImagePickerPage,
     getItemId: (asset) => String(asset.asset_id),
-    onError: (error) => setMessage({ tone: "danger", text: error }),
   });
 
   const generatedKey = draft.key || slugifyPromptRecipeKey(draft.label);
@@ -188,7 +189,6 @@ export function PromptRecipeEditorScreen({
     if (loadedAssistantDraftRef.current || selectedRecipe) {
       return;
     }
-    loadedAssistantDraftRef.current = true;
     if (!initialAssistantDraftId && (!initialAssistantSessionId || !initialAssistantMessageId)) {
       loadedAssistantDraftRef.current = false;
       return;
@@ -197,17 +197,19 @@ export function PromptRecipeEditorScreen({
     let cancelled = false;
     async function loadAssistantDraft() {
       let reviewDraft: AssistantReviewDraft | null = null;
+      let loadFailed = false;
       try {
         reviewDraft = await fetchAssistantReviewDraft(initialAssistantSessionId, initialAssistantMessageId, "prompt_recipe");
       } catch {
-        reviewDraft = null;
+        loadFailed = true;
       }
       if (!reviewDraft && initialAssistantDraftId) {
         reviewDraft = readAssistantReviewDraft(initialAssistantDraftId, "prompt_recipe");
       }
       if (cancelled) return;
+      loadedAssistantDraftRef.current = true;
       if (!reviewDraft || reviewDraft.kind !== "prompt_recipe") {
-        setMessage({ tone: "danger", text: "The assistant Prompt Recipe draft is no longer available. Ask the assistant to create it again." });
+        setMessage({ tone: "danger", text: loadFailed ? "Couldn’t load your assistant Prompt Recipe draft. Check your connection and reload this page." : "The assistant Prompt Recipe draft is no longer available. Ask the assistant to create it again." });
         return;
       }
       setDraft(promptRecipeToDraft(reviewDraft.draft));
@@ -238,6 +240,7 @@ export function PromptRecipeEditorScreen({
 
   async function generateDraft() {
     setIsGeneratingDraft(true);
+    setDraftFailureDetails(null);
     setMessage(null);
     setDraftingModelSummary(null);
     setLastDraftWarnings([]);
@@ -256,7 +259,9 @@ export function PromptRecipeEditorScreen({
       });
       const result = (await response.json()) as { ok?: boolean; error?: string } & PromptRecipeDraftResponse;
       if (!response.ok || result.ok === false || !result.draft) {
-        setMessage({ tone: "danger", text: result.error ?? "Unable to generate the Prompt Recipe draft." });
+        const text = promptRecipeDraftFailureMessage(result.error);
+        setMessage({ tone: "danger", text });
+        setDraftFailureDetails(result.error && result.error !== text ? result.error : null);
         return;
       }
       setDraft(promptRecipeToDraft(result.draft as PromptRecipeDraftPayload));
@@ -270,7 +275,7 @@ export function PromptRecipeEditorScreen({
       }
       setMessage({ tone: "healthy", text: "Draft generated. Review the fields and save when ready." });
     } catch {
-      setMessage({ tone: "danger", text: "Unable to reach the Prompt Recipe drafting service." });
+      setMessage({ tone: "danger", text: "Couldn’t prepare your Prompt Recipe draft. Check your connection and try again." });
     } finally {
       setIsGeneratingDraft(false);
     }
@@ -288,6 +293,7 @@ export function PromptRecipeEditorScreen({
   }
 
   async function saveRecipe() {
+    setDraftFailureDetails(null);
     setIsSaving(true);
     setMessage(null);
     const outputContract = parseJsonObject(draft.outputContractText, "Output contract");
@@ -348,14 +354,22 @@ export function PromptRecipeEditorScreen({
       });
       const result = (await response.json()) as { ok?: boolean; error?: string; recipe?: PromptRecipe };
       if (!response.ok || result.ok === false || !result.recipe) {
-        setMessage({ tone: "danger", text: result.error ?? "Unable to save the prompt recipe." });
+        setMessage({ tone: "danger", text: response.status >= 400 && response.status < 500
+          ? result.error ?? "Unable to save the prompt recipe."
+          : "Couldn’t confirm whether your Prompt Recipe was saved. Check the recipe list before trying again." });
         return;
       }
-      await invalidateGraphNodeDefinitions(draft.recipeId ? "prompt-recipe-updated" : "prompt-recipe-created");
+      setDraft(promptRecipeToDraft(result.recipe));
+      try {
+        await invalidateGraphNodeDefinitions(draft.recipeId ? "prompt-recipe-updated" : "prompt-recipe-created");
+      } catch {
+        setMessage({ tone: "danger", text: "Prompt Recipe saved. Reload the page to refresh the Graph node list." });
+        return;
+      }
       setMessage({ tone: "healthy", text: draft.recipeId ? "Prompt recipe updated." : "Prompt recipe created." });
       router.push(returnTo);
     } catch {
-      setMessage({ tone: "danger", text: "Unable to save the prompt recipe right now." });
+      setMessage({ tone: "danger", text: "Couldn’t confirm whether your Prompt Recipe was saved. Check the recipe list before trying again." });
     } finally {
       setIsSaving(false);
     }
@@ -471,6 +485,8 @@ export function PromptRecipeEditorScreen({
         </div>
       ) : null}
 
+      {draftFailureDetails ? <details className="callout-panel"><summary>Draft failure details</summary><p>{draftFailureDetails}</p></details> : null}
+
       {!draft.recipeId ? (
         <PromptRecipeDraftAssistantPanel
           initialDraftingConfig={initialDraftingConfig}
@@ -528,6 +544,9 @@ export function PromptRecipeEditorScreen({
       <PromptRecipeThumbnailPickerDialog
         open={thumbnailPicker.open}
         assets={thumbnailPicker.items}
+        errorMessage={thumbnailPicker.error ? "Couldn’t load thumbnail images. Retry loading the image list." : null}
+        errorDetails={thumbnailPicker.error}
+        onRetry={thumbnailPicker.retry}
         assetsLoading={thumbnailPicker.loading}
         assetsLoadingMore={thumbnailPicker.loadingMore}
         nextOffset={thumbnailPicker.nextOffset}

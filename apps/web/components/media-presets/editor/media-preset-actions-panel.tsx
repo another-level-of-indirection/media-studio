@@ -8,6 +8,7 @@ export function MediaPresetActionsPanel({
   form,
   className,
   isSaving,
+  archived,
   isExporting,
   onFormChange,
   onSave,
@@ -17,6 +18,7 @@ export function MediaPresetActionsPanel({
   form: PresetFormState;
   className: string;
   isSaving: boolean;
+  archived: boolean;
   isExporting: boolean;
   onFormChange: (updater: (current: PresetFormState) => PresetFormState) => void;
   onSave: () => void;
@@ -49,7 +51,7 @@ export function MediaPresetActionsPanel({
           ) : null}
           <AdminButton
             onClick={onSave}
-            disabled={isSaving}
+            disabled={isSaving || archived}
             className="w-full sm:w-auto"
           >
             {form.presetId ? "Save preset" : "Create preset"}
@@ -57,6 +59,7 @@ export function MediaPresetActionsPanel({
           {form.presetId ? (
             <AdminButton
               onClick={onArchive}
+              disabled={isSaving || archived}
               variant="danger"
               className="w-full px-4 py-3 text-sm normal-case tracking-normal sm:w-auto"
             >

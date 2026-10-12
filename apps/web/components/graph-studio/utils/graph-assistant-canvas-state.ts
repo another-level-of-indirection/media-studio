@@ -15,7 +15,9 @@ function canvasContent(workflow: GraphWorkflowPayload): GraphWorkflowPayload {
         execution: { mode: normalizeGraphExecutionMode(((node.metadata?.execution ?? {}) as Record<string, unknown>).mode) },
       },
     })).sort((a, b) => a.id.localeCompare(b.id)),
-    edges: [...workflow.edges].sort((a, b) => a.id.localeCompare(b.id)),
+    edges: workflow.edges.map(edge => ({
+      id: edge.id, source: edge.source, source_port: edge.source_port, target: edge.target, target_port: edge.target_port,
+    })).sort((a, b) => a.id.localeCompare(b.id)),
     metadata: { groups: readGraphGroupsFromWorkflow(workflow).map(group => ({
       id: group.id, title: group.title, color: group.color, node_ids: [...group.node_ids].sort(),
       execution: { mode: normalizeGraphExecutionMode(group.execution?.mode) },

@@ -45,3 +45,11 @@ it("does not infer current layout delivery from persisted confirmation alone", a
   expect(screen.getByRole("region", { name: "Graph confirmation status" }).textContent).toContain("Layout confirmation saved");
   expect(screen.queryByText("Workflow layout updated")).toBeNull();
 });
+
+it("recognizes delivered connections after backend adds empty edge metadata", async () => {
+  graph.edges = [{ id: "edge", source: "a-node", source_port: "text", target: "a-node", target_port: "text", metadata: {} }];
+  mount({ ...graph, edges: [{ id: "edge", source: "a-node", source_port: "text", target: "a-node", target_port: "text" }] });
+  await act(async () => Promise.resolve());
+  expect(screen.getByRole("region", { name: "Added graph status" }).textContent).toContain("Graph added");
+  graph.edges = [];
+});

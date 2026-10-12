@@ -15,9 +15,11 @@ This document locks down the UI and engineering rules we have learned from the f
 - Graph Studio submits model work through the existing Media Studio service/KIE path.
 - Workflow JSON stores durable ids and structured fields, not raw media blobs, base64, or browser filesystem paths.
 
-## Current V1 Graph Shape
+<a id="current-v1-graph-shape"></a>
 
-The first vertical slice is:
+## Original V1 Graph Shape
+
+The original vertical slice was:
 
 ```text
 Prompt Text -> Nano Banana Pro -> Save Image
@@ -25,6 +27,8 @@ Load Image  -> Nano Banana Pro
 ```
 
 The backend already owns the core graph modules under `apps/api/app/graph/`. The frontend currently renders generic nodes from definitions under `apps/web/components/graph-studio/`.
+
+For current node capabilities, use the [node library](graph-studio-node-library.md); for Assistant behavior, use [Media Assistant](media-assistant.md). Future extension proposals are distinguished in the [extension architecture](graph-studio-node-extension-architecture.md).
 
 ## Current Implemented Foundation
 

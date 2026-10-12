@@ -33,7 +33,6 @@ export function useMediaPresetThumbnailPicker({
   const picker = useMediaImagePickerPagination<MediaAssetPickerItem>({
     fetchPage: fetchGeneratedImagePickerPage,
     getItemId: (asset) => String(asset.asset_id),
-    onError: (error) => showNotice("danger", error),
   });
   const pickerItems: GeneratedThumbnailPickerItem[] = picker.items
     .map((asset) => {
@@ -48,28 +47,33 @@ export function useMediaPresetThumbnailPicker({
     formData.set("file", file);
     formData.set("presetLabel", presetLabel || "preset-thumbnail");
 
-    const response = await fetch("/api/control/media-preset-thumbnail", {
-      method: "POST",
-      body: formData,
-    });
-    const result = (await response.json()) as {
-      ok?: boolean;
-      error?: string;
-      thumbnail_path?: string;
-      thumbnail_url?: string;
-    };
+    try {
+      const response = await fetch("/api/control/media-preset-thumbnail", {
+        method: "POST",
+        body: formData,
+      });
+      const result = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        thumbnail_path?: string;
+        thumbnail_url?: string;
+      };
 
-    setIsUploadingThumbnail(false);
-    if (!response.ok || result.ok === false || !result.thumbnail_url || !result.thumbnail_path) {
-      showNotice("danger", result.error ?? "Unable to upload the preset thumbnail.");
-      return;
+      if (!response.ok || result.ok === false || !result.thumbnail_url || !result.thumbnail_path) {
+        showNotice("danger", result.error ?? "Unable to upload the preset thumbnail.");
+        return;
+      }
+
+      onThumbnailChange({
+        thumbnailPath: result.thumbnail_path,
+        thumbnailUrl: result.thumbnail_url,
+      });
+      showNotice("healthy", "Thumbnail uploaded.");
+    } catch {
+      showNotice("danger", "Couldn’t upload your thumbnail. Check your connection and try again.");
+    } finally {
+      setIsUploadingThumbnail(false);
     }
-
-    onThumbnailChange({
-      thumbnailPath: result.thumbnail_path,
-      thumbnailUrl: result.thumbnail_url,
-    });
-    showNotice("healthy", "Thumbnail uploaded.");
   }
 
   async function applyThumbnailFromAsset(assetId: string | number) {

@@ -1,6 +1,8 @@
 # Media Assistant September integration handoff
 
-PR #16 consolidates the September Assistant work plus the latest continuity, generation-status and width-first layout changes. Merge is authorized once the integration checks pass. Application data and the established installation remain unchanged by consolidation.
+**Historical integration record, reconciled October 7, 2026.** [PR #16](https://github.com/gateway/media-studio/pull/16) merged September 23 as `91b15fd`. It consolidated the September Assistant work, continuity, generation status and width-first layout. Use [Media Assistant](media-assistant.md) for current behavior and the [documentation map](README.md) for navigation.
+
+Later PRs delivered additional fixes and verification. At main `619bf1f`, [quality CI](https://github.com/gateway/media-studio/actions/runs/37600344723) and [Assistant contract CI](https://github.com/gateway/media-studio/actions/runs/37600344702) passed, including 987 backend and 903 web tests, types, lint, build and Studio smoke. The checkpoint counts and local restrictions below describe the original integration pass; they are not current CI blockers. Creative acceptance and platform release proof remain separate.
 
 ## Included changes
 
@@ -27,12 +29,13 @@ PR #16 consolidates the September Assistant work plus the latest continuity, gen
 
 The CI reconciliation preserves authored prompts under the model hard limit and requires bounded LLM repair for overlong display metadata. Regression scenarios now assert those contracts instead of obsolete soft compaction, inferred story edits or speculative grammar checks. Missing fields, malformed metadata and hard-limit rejection remain covered. Actual fixes separate storyboard fields, reject visibly unfinished metadata and make run-confirmation replies consistent with server state. Provider lifecycle/cache and saved-preset mocks now match the current contracts.
 
-Local validation for that reconciliation: 804 web tests, 199 pure storyboard/graph cases, 14 generation contract/inspection cases, seven run-handoff cases and the session-reaper regression passed. Web types/lint, file-size and diff checks passed. Two additional quoted-text metadata cases protect literal text. Remote CI remains authoritative for database-backed integration, production build and smoke coverage; its latest exact revision must pass before merge.
+Local validation for that reconciliation: 804 web tests, 199 pure storyboard/graph cases, 14 generation contract/inspection cases, seven run-handoff cases and the session-reaper regression passed. Web types/lint, file-size and diff checks passed. Two additional quoted-text metadata cases protect literal text. Remote CI remains authoritative for database-backed integration, production build and smoke coverage; the later main verification above supersedes the original pre-merge CI gate.
 
-- [ ] Reconcile remaining CI failures and verify the exact integration revision before merge.
+- [x] Integration merged; subsequent main quality and contract checks passed, as linked above.
 - [ ] MALIVE-025 creative fidelity, remaining reference/quote/balance and negative-path acceptance. Successful prompt submission is not visual-quality signoff.
 - [ ] MALIVE-026 measured context efficiency and broader compaction/disconnect/recovery coverage. Long-turn and Stop evidence exist; relative token savings remain unproven.
-- [ ] Full release verification within an explicitly permitted test environment.
+- [x] Automated main quality gate passed.
+- [ ] Remaining release acceptance: real-machine Windows/Linux onboarding and distribution/license review, separate from the creative gates above.
 
 Further paid generation requires explicit authorization. No video run, account change, data migration or destructive cleanup is part of consolidation.
 

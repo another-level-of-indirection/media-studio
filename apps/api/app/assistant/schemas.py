@@ -402,7 +402,7 @@ class AssistantGraphOperation(BaseModel):
 
 class AssistantGraphPlan(BaseModel):
     capability: AssistantCapability = "plan_graph"
-    summary: str
+    summary: str = Field(description="Supporting user-facing context for prepared Graph changes, not internal planning instructions or a claim of application.")
     questions: List[str] = Field(default_factory=list)
     operations: List[AssistantGraphOperation] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)

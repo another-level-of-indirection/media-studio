@@ -6,6 +6,7 @@ import time
 from threading import Event
 from typing import Any, Dict, List, Optional
 
+from .graph_outcome import graph_confirmation_label
 from .. import enhancement_provider, external_llm_usage, store, store_assistant
 from ..graph.pricing import estimate_graph_workflow
 from ..graph.schemas import GraphWorkflow
@@ -580,18 +581,6 @@ def _kernel_session_context(
     }
 
 
-def _graph_confirmation_label(metadata: Dict[str, Any]) -> str:
-    if metadata.get("independent_stage"):
-        return "Open new workflow"
-    if metadata.get("arrange_workflow"):
-        return "Tidy workflow"
-    if metadata.get("replace_existing_test_lane"):
-        return "Replace test lane"
-    if metadata.get("template_refinement"):
-        return "Apply refinement"
-    return "Add to canvas"
-
-
 def _next_action_for_artifacts(
     capability: AssistantKernelCapability,
     artifacts: List[AssistantKernelArtifact],
@@ -718,7 +707,7 @@ def _next_action_for_artifacts(
                     )
                     return AssistantNextAction(
                         kind="confirm_graph",
-                        label=_graph_confirmation_label(graph_plan.metadata),
+                        label=graph_confirmation_label(graph_plan.metadata, [item.model_dump() for item in graph_plan.operations]),
                         proposal_id=proposal_id,
                         confirmation_token=confirmation_token,
                         requires_confirmation=True,
@@ -741,7 +730,7 @@ def _next_action_for_artifacts(
         return AssistantNextAction()
     return AssistantNextAction(
         kind="confirm_graph",
-        label=_graph_confirmation_label(action_metadata),
+        label=graph_confirmation_label(action_metadata, proposal.get("operations") or []),
         proposal_id=proposal_id,
         confirmation_token=confirmation_token,
         requires_confirmation=True,

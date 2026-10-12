@@ -16,6 +16,9 @@ type GeneratedThumbnailPickerDialogProps = {
   loadingMore: boolean;
   nextOffset: number | null;
   selectionId: string | null;
+  errorMessage?: string | null;
+  errorDetails?: string | null;
+  onRetry?: () => void;
   zIndexClassName?: string;
   emptyMessage?: string;
   loadingMessage?: string;
@@ -36,6 +39,9 @@ export function GeneratedThumbnailPickerDialog({
   loadingMore,
   nextOffset,
   selectionId,
+  errorMessage,
+  errorDetails,
+  onRetry,
   zIndexClassName = "z-[130]",
   emptyMessage = "No generated images are available yet.",
   loadingMessage = "Loading generated images...",
@@ -56,6 +62,9 @@ export function GeneratedThumbnailPickerDialog({
       loadingMore={loadingMore}
       nextOffset={nextOffset}
       selectionId={selectionId}
+      errorMessage={errorMessage}
+      errorDetails={errorDetails}
+      onRetry={onRetry}
       purpose="thumbnail"
       imageFit="contain"
       zIndexClassName={zIndexClassName}
