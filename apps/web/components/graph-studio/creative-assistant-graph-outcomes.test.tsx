@@ -124,6 +124,8 @@ it("does not claim completion when confirmed changes fail to reach the canvas", 
   const view = await review(plan, plan.workflow, apply);
   vi.stubGlobal("fetch", vi.fn(() => json({ ...plan, plan: { ...plan.plan, status: "applied" } })));
   fireEvent.click(await view.findByRole("button", { name: "Apply node changes" }));
-  expect(await view.findByText("Changes need a fresh review")).toBeTruthy();
+  expect(await view.findByText("Approved graph needs placement")).toBeTruthy();
+  expect(view.getByRole("button", { name: "Place approved graph on canvas" })).toBeTruthy();
+  expect(view.getByText("Approved; awaiting placement")).toBeTruthy();
   expect(screen.queryByRole("region", { name: "Added graph status" })).toBeNull();
 });

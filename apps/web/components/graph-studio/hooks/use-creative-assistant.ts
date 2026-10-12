@@ -1,6 +1,6 @@
 "use client";
 
-import { graphChangeCopy } from "../utils/graph-change-copy";
+import { useAssistantGraphApply } from "./use-assistant-graph-apply";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
 
@@ -31,7 +31,7 @@ import { buildCreativeAssistantCanvasContext } from "../utils/creative-assistant
 
 export type AssistantMode = "preset" | "recipe" | "graph";
 
-type AssistantStatus = "idle" | "monitoring" | "sending" | "running" | "planning" | "draftingRecipe" | "draftingPreset" | "savingRecipe" | "savingPreset" | "applying" | "uploading" | "cancelling";
+type AssistantStatus = "idle" | "monitoring" | "sending" | "running" | "planning" | "draftingRecipe" | "draftingPreset" | "savingRecipe" | "savingPreset" | "applying" | "uploading" | "cancelling" | "refreshing";
 
 const ASSISTANT_TRACKED_TURN_STATUSES = new Set<AssistantStatus>([
   "monitoring",
@@ -291,6 +291,8 @@ export function useCreativeAssistant({
   const [progressUnavailable, setProgressUnavailable] = useState(false);
   const [progressUpdatedAt, setProgressUpdatedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [sessionLoadFailed, setSessionLoadFailed] = useState(false);
+  const [artifactRefreshFailure, setArtifactRefreshFailure] = useState<{ reason: string; label: string; message: string; detail: string } | null>(null);
   const [errorDetails, setErrorDetails] = useState<{ message: string; detail: string } | null>(null);
   const [failedRequest, setFailedRequest] = useState<FailedAssistantRequest | null>(null);
   const [runSubmissionUncertain, setRunSubmissionUncertain] = useState(false);
@@ -305,10 +307,16 @@ export function useCreativeAssistant({
   const activeAbortControllerRef = useRef<AbortController | null>(null);
   const cancellationPendingRef = useRef(false);
   const workspaceKeyRef = useRef(workspaceKey);
+  const scopeEpochRef = useRef(0);
+  const onEventRef = useRef(onEvent);
+  onEventRef.current = onEvent;
   const initialAssistantSessionIdRef = useRef(initialAssistantSessionId);
   const sessionWorkspaceKeyRef = useRef<string | null>(null);
   const activeRunOperationRef = useRef<symbol | null>(null);
   const activeApplyOperationRef = useRef<symbol | null>(null);
+  const referenceOperationRef = useRef<symbol | null>(null);
+  const refreshOperationRef = useRef<symbol | null>(null);
+  const saveOperationRef = useRef<symbol | null>(null);
   const planWorkflowOverrideRef = useRef<{
     planId: string;
     baseWorkflow: GraphWorkflowPayload;
@@ -324,7 +332,20 @@ export function useCreativeAssistant({
   const cancellable = (
     ASSISTANT_TRACKED_TURN_STATUSES.has(scopedStatus) && !requestedSessionChanged && Boolean(session?.assistant_session_id)
   ) || scopedStatus === "cancelling";
-  const canPlan = draft.trim().length > 0 && !busy;
+  const reportOperationFailure = useCallback((requestError: unknown, fallback: string) => {
+    const message = requestRejectionMessage(requestError) ?? fallback;
+    setError(message);
+    setErrorDetails({ message, detail: assistantErrorMessage(requestError, "No further details available.") });
+    onEventRef.current?.(message, "error");
+  }, []);
+
+  const { applyPlanResponse, applyRecovery, recoverGraphApply } = useAssistantGraphApply({
+    workflow, workspaceKey, initialAssistantSessionId, busy, activeApplyOperationRef,
+    onApplyWorkflow, onEvent, setPlan, setStatus, setDeliveredPlanId, setFailedApplyPlanId,
+    reportOperationFailure, clearError: () => setError(null),
+  });
+
+  const canPlan = draft.trim().length > 0 && !busy && !applyRecovery;
   const nextAction = useMemo(() => latestKernelNextAction(session), [session]);
   const runPricingSummary = nextAction?.price_estimate?.pricing_summary;
   const runConfirmationBlocker = runSubmissionUncertain
@@ -344,7 +365,7 @@ export function useCreativeAssistant({
   const unansweredRequest = session?.messages.filter(message => message.role === "user" || message.role === "assistant").at(-1)?.role === "user";
   const canApply = Boolean(
     plan?.plan.status === "validated" &&
-    !busy && !unansweredRequest &&
+    !busy && !unansweredRequest && !applyRecovery &&
     (
       !kernelActionRequired ||
       (
@@ -377,11 +398,17 @@ export function useCreativeAssistant({
   }, []);
 
   const resetAssistantState = useCallback(() => {
+    scopeEpochRef.current += 1;
     activeAbortControllerRef.current?.abort();
     cancellationPendingRef.current = false;
     sessionWorkspaceKeyRef.current = null;
     activeRunOperationRef.current = null;
     activeApplyOperationRef.current = null;
+    referenceOperationRef.current = null;
+    refreshOperationRef.current = null;
+    saveOperationRef.current = null;
+    setSessionLoadFailed(false);
+    setArtifactRefreshFailure(null);
     planWorkflowOverrideRef.current = null;
     setScopedSession(null);
     setPlan(null);
@@ -502,11 +529,12 @@ export function useCreativeAssistant({
   }, [failedRequest, hydrateExistingSession, requestedSessionChanged, restoreRecoveredPlan, scopedStatus, session?.assistant_session_id]);
 
   const loadExistingSession = useCallback(async (signal?: AbortSignal) => {
+    const expectedEpoch = scopeEpochRef.current;
     const expectedWorkspaceKey = workspaceKeyRef.current;
     if (initialAssistantSessionId) {
       if (session?.assistant_session_id === initialAssistantSessionId) return session;
       const existing = await jsonFetch<AssistantSession>(`/api/control/media/assistant/sessions/${encodeURIComponent(initialAssistantSessionId)}`, { signal });
-      return !signal?.aborted && hydrateExistingSession(existing, expectedWorkspaceKey) ? existing : null;
+      return !signal?.aborted && scopeEpochRef.current === expectedEpoch && hydrateExistingSession(existing, expectedWorkspaceKey) ? existing : null;
     }
     if (session) return session;
     if (!workflowId) return null;
@@ -514,17 +542,19 @@ export function useCreativeAssistant({
       `/api/control/media/assistant/sessions?owner_kind=graph_workflow&owner_id=${encodeURIComponent(workflowId)}&limit=1`,
       { signal },
     );
-    if (signal?.aborted) return null;
+    if (signal?.aborted || scopeEpochRef.current !== expectedEpoch) return null;
     const latest = existing.items?.[0] ?? null;
     if (latest && !hydrateExistingSession(latest, expectedWorkspaceKey)) return null;
     return latest;
   }, [hydrateExistingSession, initialAssistantSessionId, session, workflowId]);
 
   const ensureSession = useCallback(async (signal?: AbortSignal) => {
+    const expectedEpoch = scopeEpochRef.current;
     const expectedWorkspaceKey = workspaceKeyRef.current;
     if (session) return session;
     const latest = await loadExistingSession(signal);
     signal?.throwIfAborted();
+    if (scopeEpochRef.current !== expectedEpoch) throw new DOMException("Assistant workspace changed.", "AbortError");
     if (latest) return latest;
     const created = await jsonFetch<AssistantSession>("/api/control/media/assistant/sessions", {
       method: "POST", signal,
@@ -538,7 +568,7 @@ export function useCreativeAssistant({
       }),
     });
     signal?.throwIfAborted();
-    if (workspaceKeyRef.current !== expectedWorkspaceKey) return created;
+    if (scopeEpochRef.current !== expectedEpoch || workspaceKeyRef.current !== expectedWorkspaceKey) return created;
     setScopedSession(created);
     return created;
   }, [assistantMode, canvasContext, loadExistingSession, session, setScopedSession, workflow, workflowId, workflowName]);
@@ -550,14 +580,18 @@ export function useCreativeAssistant({
     // Check saved ownership before enabling a replacement send or old action.
     setStatus("monitoring");
     loadExistingSession(controller.signal).then((existing) => {
-      if (!controller.signal.aborted && !existing) setStatus("idle");
+      if (!controller.signal.aborted) {
+        setSessionLoadFailed(false);
+        if (!existing) setStatus("idle");
+      }
     }).catch((requestError) => {
       if (controller.signal.aborted) return;
-      setError(assistantErrorMessage(requestError, "Unable to load assistant session."));
+      setSessionLoadFailed(true);
+      reportOperationFailure(requestError, "Couldn’t load your saved conversation. Check your connection, then reload the conversation.");
       setStatus("idle");
     });
     return () => controller.abort();
-  }, [enabled, initialAssistantSessionId, loadExistingSession, requestedSessionChanged, session, workflowId]);
+  }, [enabled, initialAssistantSessionId, loadExistingSession, reportOperationFailure, requestedSessionChanged, session, workflowId]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -641,21 +675,34 @@ export function useCreativeAssistant({
     return result;
   }, [assistantMode, ensureSession, onBeforeReviewNavigate, onEvent, reviewReturnTo, runAbortableRequest, session]);
 
-  const refreshDefinitionsAfterAssistantSave = useCallback(async (reason: string) => {
+  const refreshDefinitionsAfterAssistantSave = useCallback(async (reason: string, label: string) => {
+    const operation = Symbol("artifact-refresh");
+    refreshOperationRef.current = operation;
+    const ownsOperation = () => refreshOperationRef.current === operation;
     try {
       await refreshGraphNodeDefinitionsOnServer();
+      if (!ownsOperation()) return false;
       await invalidateGraphNodeDefinitions(reason);
+      if (ownsOperation()) setArtifactRefreshFailure(null);
+      return ownsOperation();
     } catch (requestError) {
-      onEvent?.(assistantErrorMessage(requestError, "Saved artifact, but graph node definitions could not refresh."), "warning");
+      if (!ownsOperation()) return false;
+      const message = `Your ${label} is saved, but its graph availability couldn’t refresh. Retry the refresh before using it in a graph.`;
+      setArtifactRefreshFailure({ reason, label, message, detail: assistantErrorMessage(requestError, "No further details available.") });
+      onEvent?.(message, "warning");
+      return true;
+    } finally {
+      if (ownsOperation()) refreshOperationRef.current = null;
     }
   }, [onEvent]);
 
-  const reportOperationFailure = useCallback((requestError: unknown, fallback: string) => {
-    const message = requestRejectionMessage(requestError) ?? fallback;
-    setError(message);
-    setErrorDetails({ message, detail: assistantErrorMessage(requestError, "No further details available.") });
-    onEvent?.(message, "error");
-  }, [onEvent]);
+  const retryArtifactRefresh = useCallback(async () => {
+    if (busy || !artifactRefreshFailure) return;
+    const expectedWorkspace = workspaceKeyRef.current;
+    setStatus("refreshing");
+    const current = await refreshDefinitionsAfterAssistantSave(artifactRefreshFailure.reason, artifactRefreshFailure.label);
+    if (current && workspaceKeyRef.current === expectedWorkspace) finishAbortableOperation();
+  }, [artifactRefreshFailure, busy, finishAbortableOperation, refreshDefinitionsAfterAssistantSave]);
 
   const reportReferenceImportFailure = useCallback((requestError: unknown) => {
     reportOperationFailure(requestError, "Couldn’t import this reference image. Check your connection and choose the file again.");
@@ -676,7 +723,11 @@ export function useCreativeAssistant({
     assistantSessionId?: string | null,
     confirmation?: AssistantNextAction | null,
   ) => {
+    const operation = Symbol("save-artifact");
+    saveOperationRef.current = operation;
+    const ownsOperation = () => saveOperationRef.current === operation;
     const currentSession = assistantSessionId ? ({ assistant_session_id: assistantSessionId } as AssistantSession) : session ?? (await ensureSession());
+    if (!ownsOperation()) return null;
     setStatus("savingPreset");
     setError(null);
     try {
@@ -698,19 +749,22 @@ export function useCreativeAssistant({
           }),
         }),
       );
+      if (!ownsOperation()) return null;
       setScopedSession(result.assistant_session);
-      await refreshDefinitionsAfterAssistantSave("assistant-media-preset-saved");
+      await refreshDefinitionsAfterAssistantSave("assistant-media-preset-saved", "Media Preset");
+      if (!ownsOperation()) return null;
       setError(result.warning ?? null);
       onEvent?.(result.message || "Media Preset saved.", result.warning ? "warning" : "success");
       return result;
     } catch (requestError) {
+      if (!ownsOperation()) return null;
       if (isAbortError(requestError)) {
         reportAbortableStop("Media Preset save stopped.");
         return null;
       }
       return reportArtifactSaveFailure(requestError, "media_preset");
     } finally {
-      finishAbortableOperation();
+      if (ownsOperation()) { saveOperationRef.current = null; finishAbortableOperation(); }
     }
   }, [assistantMode, ensureSession, finishAbortableOperation, latestRunId, onEvent, refreshDefinitionsAfterAssistantSave, reportAbortableStop, reportArtifactSaveFailure, runAbortableRequest, session, setScopedSession, workflow]);
 
@@ -736,7 +790,11 @@ export function useCreativeAssistant({
     assistantSessionId?: string | null,
     confirmation?: AssistantNextAction | null,
   ) => {
+    const operation = Symbol("save-artifact");
+    saveOperationRef.current = operation;
+    const ownsOperation = () => saveOperationRef.current === operation;
     const currentSession = assistantSessionId ? ({ assistant_session_id: assistantSessionId } as AssistantSession) : session ?? (await ensureSession());
+    if (!ownsOperation()) return null;
     setStatus("savingRecipe");
     setError(null);
     try {
@@ -758,18 +816,21 @@ export function useCreativeAssistant({
           }),
         }),
       );
+      if (!ownsOperation()) return null;
       setScopedSession(result.assistant_session);
-      await refreshDefinitionsAfterAssistantSave("assistant-prompt-recipe-saved");
+      await refreshDefinitionsAfterAssistantSave("assistant-prompt-recipe-saved", "Prompt Recipe");
+      if (!ownsOperation()) return null;
       onEvent?.(result.message || "Prompt Recipe saved.", "success");
       return result;
     } catch (requestError) {
+      if (!ownsOperation()) return null;
       if (isAbortError(requestError)) {
         reportAbortableStop("Prompt Recipe save stopped.");
         return null;
       }
       return reportArtifactSaveFailure(requestError, "prompt_recipe");
     } finally {
-      finishAbortableOperation();
+      if (ownsOperation()) { saveOperationRef.current = null; finishAbortableOperation(); }
     }
   }, [assistantMode, ensureSession, finishAbortableOperation, latestRunId, onEvent, refreshDefinitionsAfterAssistantSave, reportAbortableStop, reportArtifactSaveFailure, runAbortableRequest, session, setScopedSession, workflow]);
 
@@ -831,10 +892,14 @@ export function useCreativeAssistant({
       return created;
     } catch (requestError) {
       if (activeRunOperationRef.current !== operation || workspaceKeyRef.current !== requestWorkspaceKey) return null;
-      const message = assistantErrorMessage(requestError, "Unable to confirm this graph run.");
       const uncertain = requestError instanceof JsonFetchError && requestError.code === "run_start_unconfirmed";
       setRunSubmissionUncertain(uncertain);
-      setError(uncertain ? null : message);
+      const knownBlocker = requestError instanceof JsonFetchError && ["workflow_fingerprint_mismatch", "graph_validation_failed"].includes(requestError.code ?? "");
+      const message = uncertain ? assistantErrorMessage(requestError, "The run outcome is unknown. Check run history before trying again.")
+        : knownBlocker ? assistantErrorMessage(requestError, "Review the graph before running.")
+        : requestRejectionMessage(requestError) ?? "Couldn’t prepare this run. No run was submitted. Check your connection, then review the graph and pricing before trying again.";
+      if (uncertain) setError(null);
+      else { setError(message); setErrorDetails({ message, detail: assistantErrorMessage(requestError, "No further details available.") }); }
       setRunConfirmationNeedsRecheck(
         requestError instanceof JsonFetchError && ["workflow_fingerprint_mismatch", "graph_validation_failed"].includes(requestError.code ?? ""),
       );
@@ -881,7 +946,7 @@ export function useCreativeAssistant({
     },
   ) => {
     const normalizedMessage = message.trim();
-    if (!normalizedMessage || busy || (failedRequest && !failedRequest.checked)) return null;
+    if (!normalizedMessage || busy || applyRecovery || (failedRequest && !failedRequest.checked)) return null;
     const requestWorkspaceKey = workspaceKeyRef.current;
     const requestWorkflow = options?.workflowOverride ?? workflow;
     const sourceWorkflowSignature = graphWorkflowSnapshotSignature(workflow);
@@ -1000,81 +1065,7 @@ export function useCreativeAssistant({
     } finally {
       if (!monitoring && !requestSignal?.aborted && workspaceKeyRef.current === requestWorkspaceKey) finishAbortableOperation();
     }
-  }, [assistantMode, busy, canvasContext, ensureSession, failedRequest, finishAbortableOperation, latestRunId, onEvent, reconcileFailedRequest, reportAbortableStop, reportOperationFailure, runAbortableRequest, selectedGroupIds, selectedNodeIds, session, setScopedSession, workflow]);
-
-  const applyPlanResponse = useCallback(async (
-    planResponse: AssistantPlanResponse,
-    applyWorkflow: GraphWorkflowPayload,
-    confirmation?: AssistantNextAction | null,
-  ) => {
-    const applyWorkspaceKey = workspaceKeyRef.current;
-    const operation = Symbol("apply-plan");
-    activeApplyOperationRef.current = operation;
-    const ownsOperation = () => activeApplyOperationRef.current === operation && workspaceKeyRef.current === applyWorkspaceKey;
-    setStatus("applying");
-    setError(null);
-    try {
-      const result = await jsonFetch<{
-        plan: AssistantPlan;
-        workflow: GraphWorkflowPayload;
-        validation: GraphValidationResult;
-        pricing: GraphEstimateResponse;
-      }>(`/api/control/media/assistant/plans/${planResponse.plan.assistant_plan_id}/apply`, {
-        method: "POST",
-        body: JSON.stringify({
-          workflow: applyWorkflow,
-          ...(confirmation?.kind === "confirm_graph"
-            ? {
-                proposal_id: confirmation.proposal_id,
-                confirmation_token: confirmation.confirmation_token,
-              }
-            : {}),
-        }),
-      });
-      if (!ownsOperation()) return null;
-      const previousNodeIds = new Set(applyWorkflow.nodes.map((node) => node.id));
-      const updatedNodeIds = new Set(
-        (planResponse.graph_plan.operations ?? [])
-          .filter((operation) => operation["op"] === "set_node_field" || operation["op"] === "set_node_title")
-          .map((operation) => String(operation["node_id"] || operation["node_ref"] || ""))
-          .filter(Boolean),
-      );
-      const highlightNodeIds = Array.from(new Set([
-        ...result.workflow.nodes.map((node) => node.id).filter((nodeId) => !previousNodeIds.has(nodeId)),
-        ...result.workflow.nodes.map((node) => node.id).filter((nodeId) => updatedNodeIds.has(nodeId)),
-      ]));
-      await onApplyWorkflow(result.workflow, {
-        highlightNodeIds, baseWorkflow: workflow,
-        layoutOnly: planResponse.graph_plan.operations.length === 1 && planResponse.graph_plan.operations[0]["op"] === "arrange_workflow",
-        openInNewTab: planResponse.graph_plan.metadata?.independent_stage === true,
-        assistantSessionId: planResponse.plan.assistant_session_id,
-      });
-      if (!ownsOperation()) return null;
-      setPlan({
-        ...planResponse,
-        plan: result.plan,
-        workflow: result.workflow,
-        validation: result.validation,
-        pricing: result.pricing,
-      });
-      setDeliveredPlanId(result.plan.assistant_plan_id);
-      setFailedApplyPlanId(null);
-      onEvent?.(graphChangeCopy({ ...planResponse, workflow: result.workflow }, true).copy, "success");
-      return result;
-    } catch (requestError) {
-      if (!ownsOperation()) return null;
-      setFailedApplyPlanId(planResponse.plan.assistant_plan_id);
-      const message = assistantErrorMessage(requestError, "Unable to apply assistant plan.");
-      setError(message);
-      onEvent?.(message, "error");
-      return null;
-    } finally {
-      if (ownsOperation()) {
-        activeApplyOperationRef.current = null;
-        setStatus("idle");
-      }
-    }
-  }, [onApplyWorkflow, onEvent, workflow]);
+  }, [applyRecovery, assistantMode, busy, canvasContext, ensureSession, failedRequest, finishAbortableOperation, latestRunId, onEvent, reconcileFailedRequest, reportAbortableStop, reportOperationFailure, runAbortableRequest, selectedGroupIds, selectedNodeIds, session, setScopedSession, workflow]);
 
   const useSavedArtifactInGraph = useCallback(async (message: AssistantMessage) => {
     const artifact = savedArtifactFromMessage(message);
@@ -1100,7 +1091,24 @@ export function useCreativeAssistant({
 
 
   const reloadConversation = useCallback(async () => {
-    if (busy || !session || !failedRequest) return;
+    if (busy) return;
+    if (sessionLoadFailed) {
+      const expectedWorkspace = workspaceKeyRef.current;
+      let reloadSignal: AbortSignal | undefined;
+      let recovered = false;
+      setStatus("monitoring");
+      try {
+        const existing = await runAbortableRequest(signal => { reloadSignal = signal; return loadExistingSession(signal); });
+        recovered = Boolean(existing);
+        setSessionLoadFailed(false);
+        setError(null);
+      } catch (requestError) {
+        if (isAbortError(requestError)) return;
+        reportOperationFailure(requestError, "Couldn’t load your saved conversation. Check your connection, then reload the conversation.");
+      } finally { if (!recovered && !reloadSignal?.aborted && workspaceKeyRef.current === expectedWorkspace) finishAbortableOperation(); }
+      return;
+    }
+    if (!session || !failedRequest) return;
     const expectedWorkspaceKey = workspaceKeyRef.current;
     setStatus("sending");
     try {
@@ -1111,11 +1119,11 @@ export function useCreativeAssistant({
       setError("Unable to check the saved conversation. Check your connection and reload before sending again.");
       setStatus("idle");
     }
-  }, [busy, failedRequest, reconcileFailedRequest, runAbortableRequest, session]);
+  }, [busy, failedRequest, finishAbortableOperation, loadExistingSession, reconcileFailedRequest, reportOperationFailure, runAbortableRequest, session, sessionLoadFailed]);
 
   const sendContentMessage = useCallback(async (rawContent: string, options?: { clearDraft?: boolean; metadata?: Record<string, unknown>; skipAutoActions?: boolean; continuation?: AssistantRecipeContinuationAction }) => {
     const content = rawContent.trim();
-    if (!content || busy || (failedRequest && !failedRequest.checked)) return null;
+    if (!content || busy || applyRecovery || (failedRequest && !failedRequest.checked)) return null;
     const requestWorkspaceKey = workspaceKeyRef.current;
     if (session && sessionWorkspaceKeyRef.current !== requestWorkspaceKey) return null;
     setStatus("sending");
@@ -1211,7 +1219,7 @@ export function useCreativeAssistant({
     } finally {
       if (!monitoring && !requestSignal?.aborted && workspaceKeyRef.current === requestWorkspaceKey) finishAbortableOperation();
     }
-  }, [assistantMode, busy, canvasContext, ensureSession, failedRequest, finishAbortableOperation, latestRunId, onEvent, reconcileFailedRequest, reportAbortableStop, runAbortableRequest, setScopedSession, workflow, workflowId]);
+  }, [applyRecovery, assistantMode, busy, canvasContext, ensureSession, failedRequest, finishAbortableOperation, latestRunId, onEvent, reconcileFailedRequest, reportAbortableStop, runAbortableRequest, setScopedSession, workflow, workflowId]);
 
   const sendMessage = useCallback(async () => sendContentMessage(draft), [draft, sendContentMessage]);
 
@@ -1275,14 +1283,19 @@ export function useCreativeAssistant({
 
   const attachReference = useCallback(async (reference: MediaReference, label?: string | null) => {
     if (busy) return null;
+    const operation = Symbol("attach-reference");
+    referenceOperationRef.current = operation;
+    const ownsOperation = () => referenceOperationRef.current === operation;
     setStatus("uploading");
     setError(null);
     try {
       const currentSession = await ensureSession();
+      if (!ownsOperation()) return null;
       const attachment = await jsonFetch<AssistantAttachment>(`/api/control/media/assistant/sessions/${currentSession.assistant_session_id}/attachments`, {
         method: "POST",
         body: JSON.stringify({ reference_id: reference.reference_id, label: label || reference.original_filename || "Reference media" }),
       });
+      if (!ownsOperation()) return null;
       setScopedSession((current) =>
         current
           ? {
@@ -1297,30 +1310,39 @@ export function useCreativeAssistant({
       onEvent?.("Reference image attached to assistant context.", "success");
       return attachment;
     } catch (requestError) {
+      if (!ownsOperation()) return null;
       reportOperationFailure(requestError, "Couldn’t confirm that the reference image was attached. Check the attached images before trying again.");
       return null;
     } finally {
-      setStatus("idle");
+      if (ownsOperation()) { referenceOperationRef.current = null; setStatus("idle"); }
     }
   }, [busy, ensureSession, onEvent, reportOperationFailure, setScopedSession]);
 
-  const attachFile = useCallback(async (file: File) => {
+  const attachFile = useCallback(async (file: File, onImported?: (reference: MediaReference) => void) => {
     if (busy) return null;
+    const operation = Symbol("import-reference");
+    referenceOperationRef.current = operation;
+    const ownsOperation = () => referenceOperationRef.current === operation;
     setStatus("uploading");
     setError(null);
     try {
       const reference = await importImageFile(file);
+      if (!ownsOperation()) return null;
+      onImported?.(reference);
       return await attachReference(reference, file.name);
     } catch (requestError) {
-      reportReferenceImportFailure(requestError);
+      if (ownsOperation()) reportReferenceImportFailure(requestError);
       return null;
     } finally {
-      setStatus("idle");
+      if (ownsOperation()) { referenceOperationRef.current = null; setStatus("idle"); }
     }
   }, [attachReference, busy, importImageFile, reportReferenceImportFailure]);
 
   const removeAttachment = useCallback(async (attachmentId: string) => {
     if (!session || busy) return false;
+    const operation = Symbol("remove-reference");
+    referenceOperationRef.current = operation;
+    const ownsOperation = () => referenceOperationRef.current === operation;
     setStatus("uploading");
     setError(null);
     try {
@@ -1328,6 +1350,7 @@ export function useCreativeAssistant({
         `/api/control/media/assistant/sessions/${session.assistant_session_id}/attachments/${attachmentId}`,
         { method: "DELETE" },
       );
+      if (!ownsOperation()) return false;
       setScopedSession((current) =>
         current
           ? {
@@ -1339,10 +1362,11 @@ export function useCreativeAssistant({
       onEvent?.("Reference image removed from assistant context.", "muted");
       return true;
     } catch (requestError) {
+      if (!ownsOperation()) return false;
       reportOperationFailure(requestError, "Couldn’t confirm that the reference image was removed. Check the attached images before trying again.");
       return false;
     } finally {
-      setStatus("idle");
+      if (ownsOperation()) { referenceOperationRef.current = null; setStatus("idle"); }
     }
   }, [busy, onEvent, reportOperationFailure, session, setScopedSession]);
 
@@ -1388,6 +1412,8 @@ export function useCreativeAssistant({
       plan,
       deliveredPlanId,
       failedApplyPlanId,
+      applyRecovery,
+      recoverGraphApply,
       progress,
       progressUnavailable,
       progressUpdatedAt,
@@ -1399,6 +1425,9 @@ export function useCreativeAssistant({
       reportReferenceImportFailure,
       failedRequest,
       reloadConversation,
+      sessionLoadFailed,
+      artifactRefreshFailure,
+      retryArtifactRefresh,
       runConfirmationNeedsRecheck,
       runConfirmationBlocker,
       runSubmissionUncertain,
@@ -1448,12 +1477,17 @@ export function useCreativeAssistant({
       reportReferenceImportFailure,
       failedRequest,
       reloadConversation,
+      sessionLoadFailed,
+      artifactRefreshFailure,
+      retryArtifactRefresh,
       runConfirmationNeedsRecheck,
       runConfirmationBlocker,
       runSubmissionUncertain,
       plan,
       deliveredPlanId,
       failedApplyPlanId,
+      applyRecovery,
+      recoverGraphApply,
       progress,
       progressUnavailable,
       progressUpdatedAt,

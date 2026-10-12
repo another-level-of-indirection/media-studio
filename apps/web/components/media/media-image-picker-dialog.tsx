@@ -33,6 +33,9 @@ type MediaImagePickerDialogProps = {
   emptyMessage?: string;
   loadingMessage?: string;
   itemLabel?: string;
+  errorMessage?: string | null;
+  errorDetails?: string | null;
+  onRetry?: () => void;
   onClose: () => void;
   onLoadMore: () => void;
   onSelectItem: (itemId: string) => void;
@@ -55,6 +58,7 @@ export function MediaImagePickerDialog({
   emptyMessage = "No generated images are available yet.",
   loadingMessage = "Loading generated images...",
   itemLabel = "generated image",
+  errorMessage, errorDetails, onRetry,
   onClose,
   onLoadMore,
   onSelectItem,
@@ -88,7 +92,7 @@ export function MediaImagePickerDialog({
   }, [open]);
 
   useEffect(() => {
-    if (!open || loading || loadingMore || !hasMore) return;
+    if (!open || loading || loadingMore || !hasMore || errorMessage) return;
     const root = scrollRootRef.current;
     const sentinel = sentinelRef.current;
     if (!root || !sentinel || typeof IntersectionObserver === "undefined")
@@ -103,7 +107,7 @@ export function MediaImagePickerDialog({
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [hasMore, loading, loadingMore, onLoadMore, open]);
+  }, [errorMessage, hasMore, loading, loadingMore, onLoadMore, open]);
 
   useEffect(() => {
     if (!open) {
@@ -165,7 +169,12 @@ export function MediaImagePickerDialog({
             ref={scrollRootRef}
             className="scrollbar-none flex-1 overflow-y-auto px-5 py-5"
           >
-            {loading && !items.length ? (
+            {errorMessage ? <section role="alert">
+              <p>{errorMessage}</p>
+              {onRetry ? <AdminButton disabled={loading || loadingMore} onClick={onRetry}>Retry loading images</AdminButton> : null}
+              {errorDetails ? <details><summary>Technical details</summary><p>{errorDetails}</p></details> : null}
+            </section> : null}
+            {errorMessage && !items.length ? null : loading && !items.length ? (
               <div className="admin-surface-inset flex min-h-60 items-center justify-center p-6 text-sm text-[var(--muted-strong)]">
                 {loadingMessage}
               </div>

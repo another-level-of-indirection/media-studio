@@ -122,9 +122,10 @@ function inferAssistantModeFromSession(session: ReturnType<typeof useCreativeAss
   return null;
 }
 
-const ASSISTANT_STATUS_COPY: Record<"monitoring" | "sending" | "running" | "planning" | "draftingRecipe" | "draftingPreset" | "savingRecipe" | "savingPreset" | "applying" | "uploading" | "cancelling", string> = {
+const ASSISTANT_STATUS_COPY: Record<"monitoring" | "sending" | "running" | "planning" | "draftingRecipe" | "draftingPreset" | "savingRecipe" | "savingPreset" | "applying" | "uploading" | "cancelling" | "refreshing", string> = {
   monitoring: "Checking your saved request…",
   sending: "Thinking through your request…",
+  refreshing: "Refreshing saved item",
   running: "Starting the confirmed graph run…",
   planning: "Preparing graph changes for review…",
   draftingRecipe: "Drafting a Prompt Recipe for review…",
@@ -661,7 +662,7 @@ export function CreativeAssistantPanel({
   const referencePicker = useMediaImagePickerPagination<MediaReference>({
     fetchPage: fetchReferenceImagePickerPage,
     getItemId: (reference) => reference.reference_id,
-    onError: (error) => onEvent?.(error, "error"),
+    onError: () => onEvent?.("Couldn’t load reference images. Retry loading the image list.", "error"),
   });
   const imageAttachmentCount = (assistant.session?.attachments ?? []).filter(
     (attachment) => attachment.kind === "reference_image" || attachment.kind === "image",
@@ -748,14 +749,10 @@ export function CreativeAssistantPanel({
     }
     const firstImage = Array.from(files ?? []).find((file) => file.type.startsWith("image/"));
     if (!firstImage) return;
-    try {
-      const reference = await importImageFile(firstImage);
+    await assistant.attachFile(firstImage, (reference) => {
       setLocalReferences((current) => [reference, ...current.filter((item) => item.reference_id !== reference.reference_id)]);
       referencePicker.prependItems([reference]);
-      await assistant.attachReference(reference, firstImage.name);
-    } catch (requestError) {
-      assistant.reportReferenceImportFailure(requestError);
-    }
+    });
   };
   const onDrop = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -773,9 +770,9 @@ export function CreativeAssistantPanel({
   const planMetadata = plan?.graph_plan.metadata ?? {};
   const arrangeOperations = planOperations.filter((operation) => operation["op"] === "arrange_workflow");
   const onlyArrangeOperations = arrangeOperations.length === 1 && planOperations.length === 1;
-  const planConfirmationOnly = Boolean(plan?.plan.status === "applied" &&
+  const planConfirmationOnly = Boolean(!assistant.applyRecovery && plan?.plan.status === "applied" &&
     ((onlyArrangeOperations && assistant.deliveredPlanId !== plan.plan.assistant_plan_id) || !assistantGraphContentIsOnCanvas(plan.workflow, workflow)));
-  const planApplied = plan?.plan.status === "applied" && !planConfirmationOnly;
+  const planApplied = plan?.plan.status === "applied" && !planConfirmationOnly && !assistant.applyRecovery;
   const layoutDiff = typeof planMetadata["diff_summary"] === "object" && planMetadata["diff_summary"] !== null
     ? planMetadata["diff_summary"] as Record<string, unknown>
     : {};
@@ -797,7 +794,7 @@ export function CreativeAssistantPanel({
   const noCanvasChanges = Boolean(plan && planOperationCount === 0);
   const planMissingMedia = planHasMissingMedia(plan);
   const planOptionalEmptyMedia = planHasOptionalEmptyMedia(plan);
-  const planStatusLabel = planApplyFailed ? "Needs a fresh review" : planMissingMedia ? "Needs media" : planOptionalEmptyMedia ? "Optional media skipped" : planApplied ? "Changes applied" : noCanvasChanges ? "No changes required" : plan?.validation.valid ? "Prepared for confirmation" : "Needs review";
+  const planStatusLabel = assistant.applyRecovery ? assistant.applyRecovery.approved ? "Approved; awaiting placement" : "Approval needs checking" : planApplyFailed ? "Needs a fresh review" : planMissingMedia ? "Needs media" : planOptionalEmptyMedia ? "Optional media skipped" : planApplied ? "Changes applied" : noCanvasChanges ? "No changes required" : plan?.validation.valid ? "Prepared for confirmation" : "Needs review";
   const presetSaveAction =
     assistant.nextAction?.kind === "save_media_preset" &&
     assistant.nextAction.requires_confirmation
@@ -1342,16 +1339,16 @@ export function CreativeAssistantPanel({
             >
             <div className="graph-assistant-plan-heading">
               {planApplied ? <CheckCircle2 size={15} /> : <Sparkles size={15} />}
-              <strong>{planApplyFailed ? "Changes need a fresh review" : appliedPresetWorkflow && presetTestReady ? "Test graph ready" : changeCopy?.title}</strong>
+              <strong>{assistant.applyRecovery ? assistant.applyRecovery.approved ? "Approved graph needs placement" : "Graph approval needs checking" : planApplyFailed ? "Changes need a fresh review" : appliedPresetWorkflow && presetTestReady ? "Test graph ready" : changeCopy?.title}</strong>
               {!planApplied ? <small>{pricing}</small> : null}
             </div>
             <p>
-              {planApplyFailed ? "These changes could not be confirmed on the canvas. Ask for a fresh review before trying again." : appliedPresetWorkflow ? appliedPresetNextStep : noCanvasChanges ? noCanvasChangeSummary(plan) : changeCopy?.copy}
+              {assistant.applyRecovery ? assistant.applyRecovery.approved ? "These exact graph changes are approved. Place them on the canvas without approving again or starting a run." : "Approval could not be confirmed. Check the saved approval before applying anything." : planApplyFailed ? "These changes could not be confirmed on the canvas. Ask for a fresh review before trying again." : appliedPresetWorkflow ? appliedPresetNextStep : noCanvasChanges ? noCanvasChangeSummary(plan) : changeCopy?.copy}
             </p>
             {planMissingMedia ? <p>{graphReviewErrors(plan).filter(isMissingMediaIssue).length === 1
               ? "1 required media input needs a file before this graph can run."
               : `${graphReviewErrors(plan).filter(isMissingMediaIssue).length} required media inputs need files before this graph can run.`}</p> : null}
-            {planApplyFailed ? <button type="button" disabled={assistant.busy} onClick={() => void assistant.sendContentMessage("The last changes could not be confirmed. Inspect the current workflow and prepare a fresh proposal for those changes. Do not apply or run anything.")} aria-label="Review graph again">Review graph again</button> : null}
+            {assistant.applyRecovery ? <button type="button" disabled={assistant.busy} onClick={() => void assistant.recoverGraphApply()}>{assistant.applyRecovery.approved ? "Place approved graph on canvas" : "Check saved graph approval"}</button> : planApplyFailed ? <button type="button" disabled={assistant.busy} onClick={() => void assistant.sendContentMessage("The last changes could not be confirmed. Inspect the current workflow and prepare a fresh proposal for those changes. Do not apply or run anything.")} aria-label="Review graph again">Review graph again</button> : null}
             <GraphAuthoredContext key={plan.plan.assistant_plan_id} summary={plan.graph_plan.summary} />
             {!planApplied && !noCanvasChanges && reviewCanApply ? (
               <p>Waiting for your confirmation. Choose {planActionLabel} to apply these changes. This does not start a run.</p>
@@ -1540,6 +1537,14 @@ export function CreativeAssistantPanel({
               {assistant.failedRequest.checked && assistant.failedRequest.editable ? <button type="button" disabled={assistant.busy} onClick={() => { assistant.setDraft(assistant.failedRequest!.content); messageInputRef.current?.focus(); }}>Edit request</button> : null}
             </div>
           </section> : null}
+          {assistant.sessionLoadFailed ? <section aria-label="Conversation load recovery">
+            <button type="button" disabled={assistant.busy} onClick={() => void assistant.reloadConversation()}>Reload saved conversation</button>
+          </section> : null}
+          {assistant.artifactRefreshFailure ? <section aria-label="Saved item refresh recovery">
+            <p>{assistant.artifactRefreshFailure.message}</p>
+            <button type="button" disabled={assistant.busy} onClick={() => void assistant.retryArtifactRefresh()}>Retry graph availability refresh</button>
+            <details><summary>Technical details</summary><p>{assistant.artifactRefreshFailure.detail}</p></details>
+          </section> : null}
           {assistant.runConfirmationBlocker ? <p className="graph-assistant-error">{assistant.runConfirmationBlocker}</p> : null}
           {assistant.runConfirmationNeedsRecheck || (assistant.runConfirmationBlocker && onRunWorkflow && !assistant.runSubmissionUncertain) ? (
             <button
@@ -1565,7 +1570,7 @@ export function CreativeAssistantPanel({
               <button
                 type="button"
                 className="graph-assistant-action-button"
-                disabled={!assistant.draft.trim() || assistant.busy || results.busy || Boolean(assistant.failedRequest && !assistant.failedRequest.checked)}
+                disabled={!assistant.draft.trim() || assistant.busy || results.busy || Boolean(assistant.applyRecovery) || Boolean(assistant.failedRequest && !assistant.failedRequest.checked)}
                 onClick={() => void assistant.sendMessage()}
                 aria-label="Send chat message"
                 title="Send chat message"
@@ -1583,6 +1588,9 @@ export function CreativeAssistantPanel({
         title="Choose a reference image"
         dialogLabel="Reference image picker"
         items={referencePickerItems}
+        errorMessage={referencePicker.error ? "Couldn’t load reference images. Retry loading the image list." : null}
+        errorDetails={referencePicker.error}
+        onRetry={referencePicker.retry}
         loading={referencePicker.loading}
         loadingMore={referencePicker.loadingMore}
         nextOffset={referencePicker.nextOffset}
