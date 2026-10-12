@@ -126,7 +126,6 @@ export function PromptRecipeEditorScreen({
   const thumbnailPicker = useMediaImagePickerPagination<MediaAssetPickerItem>({
     fetchPage: fetchGeneratedImagePickerPage,
     getItemId: (asset) => String(asset.asset_id),
-    onError: (error) => setMessage({ tone: "danger", text: error }),
   });
 
   const generatedKey = draft.key || slugifyPromptRecipeKey(draft.label);
@@ -355,7 +354,9 @@ export function PromptRecipeEditorScreen({
       });
       const result = (await response.json()) as { ok?: boolean; error?: string; recipe?: PromptRecipe };
       if (!response.ok || result.ok === false || !result.recipe) {
-        setMessage({ tone: "danger", text: result.error ?? "Unable to save the prompt recipe." });
+        setMessage({ tone: "danger", text: response.status >= 400 && response.status < 500
+          ? result.error ?? "Unable to save the prompt recipe."
+          : "Couldn’t confirm whether your Prompt Recipe was saved. Check the recipe list before trying again." });
         return;
       }
       setDraft(promptRecipeToDraft(result.recipe));
@@ -543,6 +544,9 @@ export function PromptRecipeEditorScreen({
       <PromptRecipeThumbnailPickerDialog
         open={thumbnailPicker.open}
         assets={thumbnailPicker.items}
+        errorMessage={thumbnailPicker.error ? "Couldn’t load thumbnail images. Retry loading the image list." : null}
+        errorDetails={thumbnailPicker.error}
+        onRetry={thumbnailPicker.retry}
         assetsLoading={thumbnailPicker.loading}
         assetsLoadingMore={thumbnailPicker.loadingMore}
         nextOffset={thumbnailPicker.nextOffset}

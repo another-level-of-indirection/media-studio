@@ -2,6 +2,8 @@
 
 import { LoaderCircle, Sparkles, X } from "lucide-react";
 
+import { enhancementFailureMessage } from "@/lib/studio-enhancement";
+
 import { Button } from "@/components/ui/button";
 
 type StudioEnhanceDialogProps = {
@@ -51,6 +53,7 @@ export function StudioEnhanceDialog({
   onOpenSetup,
   onUsePrompt,
 }: StudioEnhanceDialogProps) {
+  const errorMessage = error ? enhancementFailureMessage(error) : null;
   if (!open) {
     return null;
   }
@@ -146,7 +149,8 @@ export function StudioEnhanceDialog({
 
             {error ? (
               <div className="callout-panel callout-panel-danger px-4 py-3 text-sm">
-                {error}
+                {errorMessage}
+                {error !== errorMessage ? <details><summary>Enhancement details</summary><p>{error}</p></details> : null}
               </div>
             ) : null}
             {warnings.length ? (

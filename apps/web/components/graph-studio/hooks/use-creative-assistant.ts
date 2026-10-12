@@ -43,6 +43,8 @@ const ASSISTANT_TRACKED_TURN_STATUSES = new Set<AssistantStatus>([
 
 type AssistantProviderReadiness = {
   checked: boolean;
+  loading: boolean;
+  error: string | null;
   ready: boolean;
   configured: boolean;
   commandAvailable: boolean;
@@ -299,6 +301,8 @@ export function useCreativeAssistant({
   const [runConfirmationNeedsRecheck, setRunConfirmationNeedsRecheck] = useState(false);
   const [providerReadiness, setProviderReadiness] = useState<AssistantProviderReadiness>({
     checked: false,
+    loading: false,
+    error: null,
     ready: false,
     configured: false,
     commandAvailable: false,
@@ -314,6 +318,8 @@ export function useCreativeAssistant({
   const sessionWorkspaceKeyRef = useRef<string | null>(null);
   const activeRunOperationRef = useRef<symbol | null>(null);
   const activeApplyOperationRef = useRef<symbol | null>(null);
+  const [referenceRecovery, setReferenceRecovery] = useState<{ sessionId: string; referenceId: string } | null>(null);
+  const providerHealthControllerRef = useRef<AbortController | null>(null);
   const referenceOperationRef = useRef<symbol | null>(null);
   const refreshOperationRef = useRef<symbol | null>(null);
   const saveOperationRef = useRef<symbol | null>(null);
@@ -328,7 +334,7 @@ export function useCreativeAssistant({
   );
   const scopedStatus = workspaceKeyRef.current === workspaceKey
     ? requestedSessionChanged && !error ? "monitoring" : status : "idle";
-  const busy = scopedStatus !== "idle";
+  const busy = scopedStatus !== "idle" || Boolean(referenceRecovery);
   const cancellable = (
     ASSISTANT_TRACKED_TURN_STATUSES.has(scopedStatus) && !requestedSessionChanged && Boolean(session?.assistant_session_id)
   ) || scopedStatus === "cancelling";
@@ -405,6 +411,7 @@ export function useCreativeAssistant({
     activeRunOperationRef.current = null;
     activeApplyOperationRef.current = null;
     referenceOperationRef.current = null;
+    setReferenceRecovery(null);
     refreshOperationRef.current = null;
     saveOperationRef.current = null;
     setSessionLoadFailed(false);
@@ -593,33 +600,30 @@ export function useCreativeAssistant({
     return () => controller.abort();
   }, [enabled, initialAssistantSessionId, loadExistingSession, reportOperationFailure, requestedSessionChanged, session, workflowId]);
 
+  const refreshProviderReadiness = useCallback(async () => {
+    providerHealthControllerRef.current?.abort();
+    const controller = new AbortController();
+    providerHealthControllerRef.current = controller;
+    setProviderReadiness((current) => ({ ...current, checked: false, loading: true, error: null }));
+    try {
+      const response = await fetch("/api/control/health", { cache: "no-store", signal: controller.signal });
+      if (!response.ok) throw new Error(`Health check returned ${response.status}.`);
+      const payload = (await response.json()) as ControlApiHealthData;
+      if (controller.signal.aborted) return;
+      const readiness = providerReadinessFromHealth(payload).codexLocal;
+      setProviderReadiness({ checked: true, loading: false, error: null, ...readiness });
+    } catch {
+      if (controller.signal.aborted) return;
+      setProviderReadiness((current) => ({ ...current, checked: false, loading: false,
+        error: "Couldn’t check Codex Local readiness. Check your connection, then retry the readiness check." }));
+    }
+  }, []);
+
   useEffect(() => {
     if (!enabled) return;
-    let cancelled = false;
-    fetch("/api/control/health", { cache: "no-store" })
-      .then(async (response) => {
-        if (!response.ok) throw new Error(`Health check returned ${response.status}.`);
-        return (await response.json()) as ControlApiHealthData;
-      })
-      .then((payload) => {
-        if (cancelled) return;
-        const readiness = providerReadinessFromHealth(payload).codexLocal;
-        setProviderReadiness({
-          checked: true,
-          ready: readiness.ready,
-          configured: readiness.configured,
-          commandAvailable: readiness.commandAvailable,
-          loginConfigured: readiness.loginConfigured,
-        });
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setProviderReadiness((current) => ({ ...current, checked: true }));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [enabled]);
+    void refreshProviderReadiness();
+    return () => providerHealthControllerRef.current?.abort();
+  }, [enabled, refreshProviderReadiness]);
 
   const createMediaPresetDraftFromMessage = useCallback(async (message: string, assistantSessionId?: string | null) => {
     const currentSession = assistantSessionId ? ({ assistant_session_id: assistantSessionId } as AssistantSession) : session ?? (await ensureSession());
@@ -1281,8 +1285,47 @@ export function useCreativeAssistant({
     }
   }, [busy, createMediaPresetDraftFromMessage, draft, ensureSession, finishAbortableOperation, onEvent, reportAbortableStop, session, setScopedSession]);
 
+  // A lost attachment reply can follow a committed write. Only a fresh session read permits replay.
+  const reconcileReferenceAttachment = useCallback(async (
+    pending: { sessionId: string; referenceId: string }, operation: symbol,
+  ) => {
+    try {
+      const updated = await jsonFetch<AssistantSession>(`/api/control/media/assistant/sessions/${pending.sessionId}`);
+      if (referenceOperationRef.current !== operation) return null;
+      if (updated.assistant_session_id !== pending.sessionId || !Array.isArray(updated.attachments)) {
+        throw new Error("The attached image list could not be confirmed.");
+      }
+      setScopedSession((current) => current?.assistant_session_id === pending.sessionId
+        ? { ...current, attachments: updated.attachments } : current);
+      setReferenceRecovery(null);
+      const attached = updated.attachments.find((item) => item.reference_id === pending.referenceId) ?? null;
+      setError(attached ? null : "The reference image wasn’t attached. Choose it again to attach it.");
+      onEventRef.current?.(attached ? "Reference image attachment confirmed." : "The reference image wasn’t attached. Choose it again to attach it.", attached ? "success" : "error");
+      return attached;
+    } catch (requestError) {
+      if (referenceOperationRef.current === operation) {
+        reportOperationFailure(requestError, "Couldn’t check the attached images. Retry checking before attaching another image.");
+      }
+      return null;
+    }
+  }, [reportOperationFailure, setScopedSession]);
+
+  const retryReferenceRecovery = useCallback(async () => {
+    if (!referenceRecovery || scopedStatus !== "idle") return;
+    const operation = Symbol("check-reference-attachment");
+    referenceOperationRef.current = operation;
+    setStatus("refreshing");
+    try { await reconcileReferenceAttachment(referenceRecovery, operation); }
+    finally {
+      if (referenceOperationRef.current === operation) { referenceOperationRef.current = null; setStatus("idle"); }
+    }
+  }, [reconcileReferenceAttachment, referenceRecovery, scopedStatus]);
+
   const attachReference = useCallback(async (reference: MediaReference, label?: string | null) => {
     if (busy) return null;
+    const existing = session?.attachments.find((item) => item.reference_id === reference.reference_id);
+    if (existing) return existing;
+    let attachmentSessionId: string | null = null;
     const operation = Symbol("attach-reference");
     referenceOperationRef.current = operation;
     const ownsOperation = () => referenceOperationRef.current === operation;
@@ -1291,6 +1334,7 @@ export function useCreativeAssistant({
     try {
       const currentSession = await ensureSession();
       if (!ownsOperation()) return null;
+      attachmentSessionId = currentSession.assistant_session_id;
       const attachment = await jsonFetch<AssistantAttachment>(`/api/control/media/assistant/sessions/${currentSession.assistant_session_id}/attachments`, {
         method: "POST",
         body: JSON.stringify({ reference_id: reference.reference_id, label: label || reference.original_filename || "Reference media" }),
@@ -1311,12 +1355,17 @@ export function useCreativeAssistant({
       return attachment;
     } catch (requestError) {
       if (!ownsOperation()) return null;
-      reportOperationFailure(requestError, "Couldn’t confirm that the reference image was attached. Check the attached images before trying again.");
+      reportOperationFailure(requestError, "Couldn’t confirm that the reference image was attached. Checking the saved attached images before trying again.");
+      if (attachmentSessionId && !requestRejectionMessage(requestError)) {
+        const pending = { sessionId: attachmentSessionId, referenceId: reference.reference_id };
+        setReferenceRecovery(pending);
+        return await reconcileReferenceAttachment(pending, operation);
+      }
       return null;
     } finally {
       if (ownsOperation()) { referenceOperationRef.current = null; setStatus("idle"); }
     }
-  }, [busy, ensureSession, onEvent, reportOperationFailure, setScopedSession]);
+  }, [busy, ensureSession, onEvent, reconcileReferenceAttachment, reportOperationFailure, session, setScopedSession]);
 
   const attachFile = useCallback(async (file: File, onImported?: (reference: MediaReference) => void) => {
     if (busy) return null;
@@ -1432,6 +1481,9 @@ export function useCreativeAssistant({
       runConfirmationBlocker,
       runSubmissionUncertain,
       providerReadiness,
+      refreshProviderReadiness,
+      referenceRecovery,
+      retryReferenceRecovery,
       canPlan,
       canApply,
       nextAction,
@@ -1492,6 +1544,9 @@ export function useCreativeAssistant({
       progressUnavailable,
       progressUpdatedAt,
       providerReadiness,
+      refreshProviderReadiness,
+      referenceRecovery,
+      retryReferenceRecovery,
       removeAttachment,
       openSavedArtifactEditor,
       saveMediaPresetFromMessage,

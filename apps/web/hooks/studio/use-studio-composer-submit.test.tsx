@@ -114,3 +114,16 @@ it("times out the enhancement with an actionable message and keeps the original 
   expect(screen.getByText("Keep warm amber light and 4:3 framing.")).toBeTruthy();
   expect((screen.getByRole("button", { name: "Use Prompt" }) as HTMLButtonElement).disabled).toBe(true);
 });
+
+it.each(["Codex Local App Server returned invalid JSON.", "Codex Local returned an empty response."])("keeps %s in optional enhancement details and preserves input", async (error) => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ ok: false, error }, { status: 502 })));
+  render(<EnhancementFlow />);
+  fireEvent.click(screen.getByRole("button", { name: "Enhance", exact: true }));
+  const message = "Couldn’t enhance your prompt. Try again, or check the enhancement provider in Settings.";
+  const dialog = screen.getByTestId("studio-enhance-dialog");
+  expect(await within(dialog).findByText(message)).toBeTruthy();
+  expect(within(dialog).getByText(error).closest("details")).toBeTruthy();
+  expect(screen.getByLabelText("Activity").textContent).toBe(message);
+  expect(screen.getByText("Keep warm amber light and 4:3 framing.")).toBeTruthy();
+  expect((screen.getByRole("button", { name: "Use Prompt" }) as HTMLButtonElement).disabled).toBe(true);
+});

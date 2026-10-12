@@ -6,4 +6,4 @@ When a connection fails, check the connection and try Enhance again. For a timeo
 
 The enhancement dialog and Studio activity use the same failure guidance. The original prompt and attached references remain in the composer through failure and retry. A previous preview clears when a new request starts, and **Use Prompt** remains unavailable during that request or after failure.
 
-Known provider and internal route diagnostics use recovery guidance in the primary message. Their original response remains inspectable through the browser’s Network tools; the existing opt-in **Settings → General → Studio Debug Console** also records enhancement response status and errors. Helpful provider setup advice remains visible.
+Known provider and internal route diagnostics use recovery guidance in the primary message. Known Codex Local invalid-JSON and empty-response diagnostics are available under **Enhancement details**. Other original responses remain inspectable through the browser’s Network tools; the existing opt-in **Settings → General → Studio Debug Console** also records enhancement response status and errors. Helpful provider setup advice remains visible.

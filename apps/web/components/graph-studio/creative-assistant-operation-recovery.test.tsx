@@ -80,8 +80,8 @@ it.each(['attach', 'remove', 'import', 'rejection'])('reports reference %s failu
         ? 'Couldn’t import this reference image. Check your connection and choose the file again.'
         : operation === 'rejection' ? 'This reference belongs to another conversation.'
             : `Couldn’t confirm that the reference image was ${operation === 'remove' ? 'removed' : 'attached'}. Check the attached images before trying again.`;
-    expect(result.current.error).toBe(expected);
-    expect(events).toHaveBeenCalledWith(expected, 'error');
-    expect(result.current.errorDetails).toBe(operation === 'import' ? 'Upload service unavailable' : operation === 'rejection' ? expected : 'Failed to fetch');
+    expect(result.current.error).toBe(operation === 'attach' ? 'The reference image wasn’t attached. Choose it again to attach it.' : expected);
+    expect(events).toHaveBeenCalledWith(operation === 'attach' ? 'The reference image wasn’t attached. Choose it again to attach it.' : expected, 'error');
+    expect(result.current.errorDetails).toBe(operation === 'attach' ? null : operation === 'import' ? 'Upload service unavailable' : operation === 'rejection' ? expected : 'Failed to fetch');
     expect(result.current.busy).toBe(false);
 });

@@ -1,5 +1,7 @@
 "use client";
 
+import { isCodexLocalResponseFailure } from "@/lib/provider-request-failure";
+
 import type { MutableRefObject } from "react";
 
 import type { AttachmentRecord, ComposerStatusMessage } from "@/lib/media-studio-contract";
@@ -248,7 +250,8 @@ export function useStudioComposerSubmit(options: UseStudioComposerSubmitOptions)
         studioDebug("enhancement", { status: response.status, error: "error" in payload ? payload.error : undefined });
         const errorMessage = enhancementFailureMessage("error" in payload ? payload.error : undefined);
         options.setEnhancePreview(null);
-        options.setEnhanceError(errorMessage);
+        // Keep known response diagnostics for the dialog’s optional details.
+        options.setEnhanceError("error" in payload && isCodexLocalResponseFailure(payload.error) ? payload.error ?? errorMessage : errorMessage);
         options.showActivity({ tone: "danger", message: errorMessage }, { autoHideMs: 4200 });
         return;
       }

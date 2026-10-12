@@ -14,6 +14,9 @@ export function PromptRecipeThumbnailPickerDialog({
   assetsLoadingMore,
   nextOffset,
   selectionId,
+  errorMessage,
+  errorDetails,
+  onRetry,
   onClose,
   onLoadMore,
   onSelectAsset,
@@ -24,6 +27,9 @@ export function PromptRecipeThumbnailPickerDialog({
   assetsLoadingMore: boolean;
   nextOffset: number | null;
   selectionId: string | null;
+  errorMessage?: string | null;
+  errorDetails?: string | null;
+  onRetry?: () => void;
   onClose: () => void;
   onLoadMore: () => void;
   onSelectAsset: (assetId: string | number) => void;
@@ -46,6 +52,9 @@ export function PromptRecipeThumbnailPickerDialog({
       loadingMore={assetsLoadingMore}
       nextOffset={nextOffset}
       selectionId={selectionId}
+      errorMessage={errorMessage}
+      errorDetails={errorDetails}
+      onRetry={onRetry}
       onClose={onClose}
       onLoadMore={onLoadMore}
       onSelectItem={onSelectAsset}

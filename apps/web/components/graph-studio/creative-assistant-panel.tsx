@@ -1065,6 +1065,10 @@ export function CreativeAssistantPanel({
             onAction={(continuation, label) => { void assistant.sendContentMessage(label, { continuation, clearDraft: false }); }}
           />
           <section className="graph-assistant-thread" aria-label="Assistant messages">
+          {!readOnlyProvider && assistant.providerReadiness.error ? <section aria-label="Provider readiness recovery" role="status">
+            <p>{assistant.providerReadiness.error}</p>
+            <button type="button" disabled={assistant.providerReadiness.loading} onClick={() => void assistant.refreshProviderReadiness()}>Retry readiness check</button>
+          </section> : null}
           {codexBlocker ? (
             <div className="graph-assistant-readiness" role="status">
               <strong>Codex Local needs setup for native chat.</strong>
@@ -1536,6 +1540,9 @@ export function CreativeAssistantPanel({
               <button type="button" disabled={assistant.busy} onClick={() => void assistant.reloadConversation()}>Reload saved conversation</button>
               {assistant.failedRequest.checked && assistant.failedRequest.editable ? <button type="button" disabled={assistant.busy} onClick={() => { assistant.setDraft(assistant.failedRequest!.content); messageInputRef.current?.focus(); }}>Edit request</button> : null}
             </div>
+          </section> : null}
+          {assistant.referenceRecovery ? <section aria-label="Reference attachment recovery">
+            <button type="button" disabled={assistant.status !== "idle"} onClick={() => void assistant.retryReferenceRecovery()}>Check attached images again</button>
           </section> : null}
           {assistant.sessionLoadFailed ? <section aria-label="Conversation load recovery">
             <button type="button" disabled={assistant.busy} onClick={() => void assistant.reloadConversation()}>Reload saved conversation</button>

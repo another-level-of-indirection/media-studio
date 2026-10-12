@@ -77,6 +77,7 @@ export function MediaPresetEditorScreen({
   const defaultModelKey = initialModelKey ?? selectedPreset?.model_key ?? "nano-banana-2";
   const [presetForm, setPresetForm] = useState<PresetFormState>(() => buildPresetForm(selectedPreset, defaultModelKey));
   const [isSaving, setIsSaving] = useState(false);
+  const [archived, setArchived] = useState(selectedPreset?.status === "archived");
   const [assistantWarnings, setAssistantWarnings] = useState<string[]>([]);
   const [isExporting, setIsExporting] = useState(false);
   const { notice: message, showNotice } = useAdminActionNotice();
@@ -141,6 +142,7 @@ export function MediaPresetEditorScreen({
   }, [defaultModelKey, initialAssistantDraftId, initialAssistantMessageId, initialAssistantSessionId, selectedPreset, showNotice]);
 
   async function savePreset() {
+    if (archived || isSaving) return;
     setIsSaving(true);
     const resolvedKey = generatedPresetKey;
     const presetError = normalizePresetEditorError(presetForm);
@@ -205,7 +207,9 @@ export function MediaPresetEditorScreen({
       });
       const result = (await response.json()) as { ok?: boolean; error?: string; preset?: MediaPreset };
       if (!response.ok || result.ok === false || !result.preset) {
-        showNotice("danger", result.error ?? "Couldn’t save your Media Preset. Review its fields and try again.");
+        showNotice("danger", response.status >= 400 && response.status < 500
+          ? result.error ?? "Couldn’t save your Media Preset. Review its fields and try again."
+          : "Couldn’t confirm whether your Media Preset was saved. Check the preset list before trying again.");
         return;
       }
       setPresetForm(buildPresetForm(result.preset, defaultModelKey));
@@ -258,21 +262,32 @@ export function MediaPresetEditorScreen({
   }
 
   async function archivePreset() {
-    if (!presetForm.presetId) {
-      return;
-    }
+    if (!presetForm.presetId || archived || isSaving) return;
     setIsSaving(true);
-    const response = await fetch(`/api/control/media-presets/${presetForm.presetId}`, { method: "DELETE" });
-    const result = (await response.json()) as { ok?: boolean; error?: string; preset?: MediaPreset };
-    if (!response.ok || result.ok === false) {
+    try {
+      const response = await fetch(`/api/control/media-presets/${presetForm.presetId}`, { method: "DELETE" });
+      const result = (await response.json()) as { ok?: boolean; error?: string; preset?: MediaPreset };
+      if (!response.ok || result.ok === false) {
+        showNotice("danger", response.status >= 400 && response.status < 500
+          ? result.error ?? "Couldn’t archive your preset. Check the preset list before trying again."
+          : "Couldn’t confirm whether your preset was archived. Check the preset list before trying again.");
+        return;
+      }
+      setArchived(true);
+      setPresetForm((current) => ({ ...current, status: "inactive" }));
+      try {
+        await invalidateGraphNodeDefinitions("media-preset-archived");
+      } catch {
+        showNotice("danger", "Preset archived. Reload the page to refresh the Graph node list.");
+        return;
+      }
+      showNotice("healthy", "Preset archived.");
+      router.push(returnToPresetsHref);
+    } catch {
+      showNotice("danger", "Couldn’t confirm whether your preset was archived. Check the preset list before trying again.");
+    } finally {
       setIsSaving(false);
-      showNotice("danger", result.error ?? "Unable to archive the preset.");
-      return;
     }
-    await invalidateGraphNodeDefinitions("media-preset-archived");
-    setIsSaving(false);
-    showNotice("healthy", "Preset archived.");
-    router.push(returnToPresetsHref);
   }
 
   return (
@@ -346,6 +361,7 @@ export function MediaPresetEditorScreen({
             form={presetForm}
             className={accentCardClassName}
             isSaving={isSaving}
+            archived={archived}
             isExporting={isExporting}
             onFormChange={setPresetForm}
             onExport={() => void exportPreset()}
@@ -361,6 +377,9 @@ export function MediaPresetEditorScreen({
         title="Choose a thumbnail"
         description="Pick a recent generated image to use as this preset thumbnail."
         items={thumbnailPickerState.pickerItems}
+        errorMessage={thumbnailPickerState.picker.error ? "Couldn’t load thumbnail images. Retry loading the image list." : null}
+        errorDetails={thumbnailPickerState.picker.error}
+        onRetry={thumbnailPickerState.picker.retry}
         loading={thumbnailPickerState.picker.loading}
         loadingMore={thumbnailPickerState.picker.loadingMore}
         nextOffset={thumbnailPickerState.picker.nextOffset}
