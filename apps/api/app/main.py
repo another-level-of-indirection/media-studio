@@ -52,6 +52,8 @@ from .schemas import (
     ProjectUpsertRequest,
     PresetListResponse,
     PresetRecord,
+    PresetSummaryRecord,
+    PresetSummaryListResponse,
     PresetUpsertRequest,
     PricingResponse,
     PricingEstimateResponse,
@@ -388,6 +390,23 @@ def search_presets(
         offset=int(page["offset"]),
         next_offset=page["next_offset"],
     )
+
+
+@app.get("/media/presets/summary", response_model=List[PresetSummaryRecord])
+def list_preset_summaries():
+    return [PresetSummaryRecord(**item) for item in store.list_presets(summary=True)]
+
+
+@app.get("/media/presets/search/summary", response_model=PresetSummaryListResponse)
+def search_preset_summaries(
+    limit: int = Query(default=60, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    q: Optional[str] = Query(default=None),
+    category: Optional[str] = Query(default=None),
+    status: str = Query(default="active"),
+):
+    page = store.list_presets_page(limit=limit, offset=offset, q=q, category=category, status=status, summary=True)
+    return PresetSummaryListResponse(**{**page, "items": [PresetSummaryRecord(**item) for item in page["items"]]})
 
 
 @app.get("/media/presets/{preset_id}", response_model=PresetRecord)

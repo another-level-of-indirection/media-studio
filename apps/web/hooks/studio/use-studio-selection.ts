@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useStudioPresetDetail } from "@/hooks/studio/use-studio-shell-catalog";
 
 import {
   mediaDisplayUrl,
@@ -117,10 +118,7 @@ export function useStudioSelection({
       ? selectedAssetHydratedJob
       : selectedAssetCachedJob;
   const selectedAssetPrompt = mediaAssetPrompt(selectedAsset, selectedAssetJob);
-  const selectedAssetPreset = useMemo(
-    () => presets.find((preset) => preset.key === selectedAsset?.preset_key) ?? null,
-    [presets, selectedAsset?.preset_key],
-  );
+  const { currentPreset: selectedAssetPreset } = useStudioPresetDetail(presets, selectedAsset?.preset_key ?? "");
   const selectedAssetPresetFields = useMemo(
     () => normalizeStructuredPresetTextFields(selectedAssetPreset),
     [selectedAssetPreset],

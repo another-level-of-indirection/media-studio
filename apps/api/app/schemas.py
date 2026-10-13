@@ -296,6 +296,41 @@ class PresetListResponse(BaseModel):
     next_offset: Optional[int] = None
 
 
+class PresetSummaryRecord(BaseModel):
+    preset_id: str
+    key: str
+    label: str
+    description: Optional[str] = None
+    category: str = "general"
+    status: str = "active"
+    model_key: Optional[str] = None
+    source_kind: str = "custom"
+    base_builtin_key: Optional[str] = None
+    applies_to_models: List[str] = Field(default_factory=list, validation_alias="applies_to_models_json")
+    applies_to_task_modes: List[str] = Field(default_factory=list, validation_alias="applies_to_task_modes_json")
+    applies_to_input_patterns: List[str] = Field(default_factory=list, validation_alias="applies_to_input_patterns_json")
+    requires_image: bool = False
+    requires_video: bool = False
+    requires_audio: bool = False
+    thumbnail_path: Optional[str] = None
+    thumbnail_url: Optional[str] = None
+    version: Optional[str] = None
+    priority: int = 100
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    input_schema_count: int = 0
+    input_slots_count: int = 0
+    image_input_policy: str = "none"
+
+
+class PresetSummaryListResponse(BaseModel):
+    items: List[PresetSummaryRecord] = Field(default_factory=list)
+    total: int = 0
+    limit: int = 60
+    offset: int = 0
+    next_offset: Optional[int] = None
+
+
 class PromptRecipeVariable(BaseModel):
     key: str
     token: Optional[str] = None

@@ -114,7 +114,7 @@ describe("control media-presets route", () => {
     expect(payload.presets[0]).not.toHaveProperty("input_slots_json");
     expect(payload.presets[0]).not.toHaveProperty("notes");
     expect(getControlApiJson).toHaveBeenCalledWith(
-      "/media/presets/search?limit=60&offset=0&status=active",
+      "/media/presets/search/summary?limit=60&offset=0&status=active",
       "read",
     );
   });

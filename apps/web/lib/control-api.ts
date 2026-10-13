@@ -58,6 +58,7 @@ import { normalizeMediaPresetCategory } from "@/lib/media-preset-categories";
 import { toControlApiDataProxyPath, toControlApiProxyPath } from "@/lib/media-paths";
 import { INITIAL_ASSET_PAGE_SIZE } from "@/lib/media-studio-contract";
 import { deriveStudioModelSupport } from "@/lib/studio-model-support";
+import { presetImageInputPolicy } from "@/lib/media-studio-helpers";
 import {
   mapAssetPickerRecord,
   mapAssetRecord,
@@ -376,6 +377,7 @@ export function mapPresetSummaryRecord(preset: ControlApiRawRecord): MediaPreset
     updated_at: preset.updated_at ?? null,
     input_schema_count: Number(preset.input_schema_count ?? countArrayValue(inputSchema)),
     input_slots_count: Number(preset.input_slots_count ?? countArrayValue(inputSlots)),
+    image_input_policy: preset.image_input_policy ?? presetImageInputPolicy({ input_slots_json: inputSlots } as MediaPreset),
   } as MediaPresetSummaryItem;
 }
 
@@ -756,27 +758,38 @@ export async function getControlPlaneSnapshot() {
   };
 }
 
-export async function getMediaDashboardSnapshot(options?: { batchesLimit?: number; batchesOffset?: number; projectId?: string | null; presetsLimit?: number }) {
+type MediaDashboardOptions = { batchesLimit?: number; batchesOffset?: number; projectId?: string | null; presetsLimit?: number };
+
+export function getMediaDashboardSnapshot(options?: MediaDashboardOptions) {
+  return loadMediaDashboardSnapshot(options, false);
+}
+
+export function getStudioSnapshot(options?: { projectId?: string | null }) {
+  return loadMediaDashboardSnapshot(options, true);
+}
+
+async function loadMediaDashboardSnapshot(options: MediaDashboardOptions | undefined, studioOnly: boolean) {
   const batchesLimit = options?.batchesLimit ?? 8;
   const batchesOffset = options?.batchesOffset ?? 0;
   const projectId = options?.projectId ? String(options.projectId) : null;
   const projectParams = projectId ? `&project_id=${encodeURIComponent(projectId)}` : "";
   const presetsLimit = options?.presetsLimit ? Math.max(1, Math.min(100, Math.trunc(options.presetsLimit))) : null;
-  const presetsEndpoint = presetsLimit ? `/media/presets/search?limit=${presetsLimit}&status=active` : "/media/presets";
+  const presetsEndpoint = studioOnly ? "/media/presets/summary" : presetsLimit ? `/media/presets/search?limit=${presetsLimit}&status=active` : "/media/presets";
+  const unused = Promise.resolve({ ok: true, data: null });
   const [health, credits, pricing, externalUsageSummaryRaw, externalUsageRaw, modelsRaw, presetsRaw, promptRecipesRaw, promptsRaw, enhancementRaw, promptRecipeDraftingConfigRaw, mediaAssistantConfigRaw, queueSettingsRaw, queuePoliciesRaw, projectsRaw, batchesRaw, jobsRaw, assetsRaw, latestAssetRaw] =
     await Promise.all([
       fetchControlApiJson<ControlApiHealthData>("/health"),
       fetchControlApiJson<MediaCreditsResponse>("/media/credits"),
       fetchControlApiJson<ControlApiRawRecord>("/media/pricing"),
-      fetchControlApiJson<ControlApiRawRecord>("/media/external-llm-usage/summary"),
-      fetchControlApiJson<ControlApiRawRecord>("/media/external-llm-usage?limit=20"),
+      studioOnly ? unused : fetchControlApiJson<ControlApiRawRecord>("/media/external-llm-usage/summary"),
+      studioOnly ? unused : fetchControlApiJson<ControlApiRawRecord>("/media/external-llm-usage?limit=20"),
       fetchControlApiJson<ControlApiRawList>("/media/models"),
       fetchControlApiJson<ControlApiRawList | ControlApiRawRecord>(presetsEndpoint),
-      fetchControlApiJson<ControlApiRawList>("/prompt-recipes?status=all"),
+      studioOnly ? unused : fetchControlApiJson<ControlApiRawList>("/prompt-recipes?status=all"),
       fetchControlApiJson<ControlApiRawList>("/media/system-prompts"),
       fetchControlApiJson<ControlApiRawList>("/media/enhancement-configs"),
-      fetchControlApiJson<ControlApiRawRecord>("/media/prompt-recipe-drafting-config"),
-      fetchControlApiJson<ControlApiRawRecord>("/media/assistant-config"),
+      studioOnly ? unused : fetchControlApiJson<ControlApiRawRecord>("/media/prompt-recipe-drafting-config"),
+      studioOnly ? unused : fetchControlApiJson<ControlApiRawRecord>("/media/assistant-config"),
       fetchControlApiJson<ControlApiRawRecord>("/media/queue/settings"),
       fetchControlApiJson<ControlApiRawList>("/media/queue/policies"),
       fetchControlApiJson<ControlApiRawRecord>("/media/projects?status=all"),
@@ -792,7 +805,7 @@ export async function getMediaDashboardSnapshot(options?: { batchesLimit?: numbe
     : Array.isArray(presetsRaw.data?.items)
       ? (presetsRaw.data.items as ControlApiRawList)
       : [];
-  const presets = rawPresetItems.map(mapPresetRecord);
+  const presets = rawPresetItems.map(studioOnly ? mapPresetSummaryRecord : mapPresetRecord);
   const presetTotal = Array.isArray(presetsRaw.data) ? presets.length : Number(presetsRaw.data?.total ?? presets.length);
   const presetLimit = Array.isArray(presetsRaw.data) ? presets.length : Number(presetsRaw.data?.limit ?? presets.length);
   const presetOffset = Array.isArray(presetsRaw.data) ? 0 : Number(presetsRaw.data?.offset ?? 0);
