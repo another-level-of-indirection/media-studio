@@ -1,12 +1,40 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { StudioGallery } from "@/components/studio/studio-gallery";
 import type { GalleryTile } from "@/lib/studio-gallery";
 
 describe("StudioGallery", () => {
+  afterEach(cleanup);
+
+  it("offers a manual first-page retry even when no gallery cards could load", () => {
+    const onLoadMore = vi.fn();
+    render(
+      <StudioGallery
+        apiHealthy
+        immersive
+        galleryTiles={[]}
+        activeGalleryHasMore={false}
+        activeGalleryLoadingMore={false}
+        firstGalleryPageFailed
+        selectedAssetId={null}
+        favoriteAssetIdBusy={null}
+        galleryLoadMoreRef={{ current: null }}
+        onLoadMore={onLoadMore}
+        onSelectAsset={() => undefined}
+        onSelectFailedJob={() => undefined}
+        onDragAsset={() => undefined}
+        onToggleFavorite={() => undefined}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry loading gallery" }));
+    expect(onLoadMore).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("Start your first render.")).toBeNull();
+  });
+
   it("shows a startup state instead of a misleading empty gallery when the media backend is not ready", () => {
     render(
       <StudioGallery
@@ -84,19 +112,8 @@ describe("StudioGallery", () => {
     expect(onSelectFailedJob).toHaveBeenCalledWith("job-1");
   });
 
-  it("keeps active queue tiles before completed assets", () => {
+  it("preserves the active-queue-first tile order supplied by the gallery feed", () => {
     const tiles: GalleryTile[] = [
-      {
-        asset: {
-          asset_id: "asset-1",
-          generation_kind: "image",
-          model_key: "nano-banana-2",
-          prompt_summary: "Finished image",
-        } as never,
-        label: "Finished image",
-        batch: null,
-        job: null,
-      },
       {
         asset: null,
         label: "Queued output",
@@ -112,6 +129,17 @@ describe("StudioGallery", () => {
           model_key: "gpt-image-2-image-to-image",
           created_at: "2026-05-19T00:00:01Z",
         } as never,
+      },
+      {
+        asset: {
+          asset_id: "asset-1",
+          generation_kind: "image",
+          model_key: "nano-banana-2",
+          prompt_summary: "Finished image",
+        } as never,
+        label: "Finished image",
+        batch: null,
+        job: null,
       },
     ];
 

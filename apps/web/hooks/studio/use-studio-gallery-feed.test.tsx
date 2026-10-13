@@ -404,4 +404,64 @@ describe("useStudioGalleryFeed", () => {
     });
     expect(fetchPage).toHaveBeenCalledTimes(4);
   });
+
+  it("reuses a still-pending first-page read when the user returns to its query", async () => {
+    const pending = pendingPage();
+    const fetchPage = vi.fn((url: string) => url.includes("generation_kind=image") ? pending.response : Promise.resolve({
+      ok: true,
+      json: async () => ({ ok: true, assets: [], offset: 0, has_more: false, next_offset: null }),
+    }));
+    vi.stubGlobal("fetch", fetchPage);
+    const { result } = renderHook(() => useStudioGalleryFeed(paginatedFeedOptions));
+    await act(async () => { result.current.actions.setGalleryKindFilter("image"); });
+    await act(async () => { result.current.actions.setGalleryKindFilter("video"); });
+    await act(async () => { result.current.actions.setGalleryKindFilter("image"); });
+    const requestsBeforeSettlement = fetchPage.mock.calls.length;
+    await act(async () => { pending.finish(); await pending.response; });
+
+    expect(requestsBeforeSettlement).toBe(2);
+    expect(result.current.state.localAssets.map((asset) => asset.asset_id)).toEqual(["project-asset"]);
+  });
+
+  it.each(["image", "favorites"] as const)("can retry a failed %s first page through the gallery action", async (query) => {
+    const failed = pendingPage();
+    const retriedAsset = { ...projectAsset, asset_id: "retried-first-page", favorited: true };
+    const fetchPage = vi.fn().mockReturnValueOnce(failed.response).mockImplementation(async () => ({
+      ok: true,
+      json: async () => ({ ok: true, assets: [retriedAsset], offset: 0, has_more: false, next_offset: null }),
+    }));
+    vi.stubGlobal("fetch", fetchPage);
+    const { result } = renderHook(() => useStudioGalleryFeed(paginatedFeedOptions));
+    await act(async () => {
+      if (query === "image") result.current.actions.setGalleryKindFilter("image");
+      else result.current.actions.toggleFavoritesFilter();
+    });
+    await act(async () => { failed.fail(); await failed.response; });
+    await act(async () => { await result.current.actions.loadMoreActiveGalleryAssets(); });
+
+    expect(fetchPage).toHaveBeenCalledTimes(2);
+    const displayed = query === "favorites" ? result.current.state.favoriteAssets : result.current.state.localAssets;
+    expect(displayed?.map((asset) => asset.asset_id)).toEqual(["retried-first-page"]);
+    expect(fetchPage.mock.calls[1][0]).toContain("limit=18&offset=0&view=summary");
+  });
+
+  it("consumes a successful first-page retry once before the next render", async () => {
+    const failed = pendingPage();
+    const retried = pendingPage();
+    const fetchPage = vi.fn().mockReturnValueOnce(failed.response).mockReturnValue(retried.response);
+    vi.stubGlobal("fetch", fetchPage);
+    const { result } = renderHook(() => useStudioGalleryFeed(paginatedFeedOptions));
+    act(() => { result.current.actions.setGalleryKindFilter("image"); });
+    await act(async () => { failed.fail(); await failed.response; });
+    const retry = result.current.actions.loadMoreActiveGalleryAssets;
+    await act(async () => {
+      const loading = retry();
+      retried.finish();
+      await loading;
+      await retry();
+    });
+
+    expect(fetchPage).toHaveBeenCalledTimes(2);
+    expect(result.current.state.firstGalleryPageFailed).toBe(false);
+  });
 });

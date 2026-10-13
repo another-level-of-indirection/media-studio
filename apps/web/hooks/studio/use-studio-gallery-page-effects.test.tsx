@@ -56,6 +56,7 @@ function EffectsHarness({
     setPrefetchedFavoriteAssetPage: vi.fn(),
     setPrefetchingAssetPage: vi.fn(),
     setPrefetchingFavoriteAssetPage: vi.fn(),
+    setFirstGalleryPageFailed: vi.fn(),
   });
 
   return null;

@@ -42,6 +42,7 @@ type UseStudioGalleryFeedResult = {
     assetFeedHasMore: boolean;
     assetFeedNextOffset: number | null;
     loadingMoreAssets: boolean;
+    firstGalleryPageFailed: boolean;
     localLatestAsset: MediaAsset | null;
     galleryModelFilter: string;
     galleryKindFilter: GalleryKindFilter;
@@ -110,6 +111,7 @@ export function useStudioGalleryFeed({
   const [assetFeedHasMore, setAssetFeedHasMore] = useState(initialAssetsHasMore);
   const [assetFeedNextOffset, setAssetFeedNextOffset] = useState<number | null>(initialAssetsNextOffset);
   const [loadingMoreAssets, setLoadingMoreAssets] = useState(false);
+  const [firstGalleryPageFailed, setFirstGalleryPageFailed] = useState(false);
   const [prefetchingAssetPage, setPrefetchingAssetPage] = useState(false);
   const [prefetchedAssetPage, setPrefetchedAssetPage] = useState<AssetPagePayload | null>(null);
   const [localLatestAsset, setLocalLatestAsset] = useState<MediaAsset | null>(latestAsset);
@@ -156,11 +158,12 @@ export function useStudioGalleryFeed({
   const initialAssetQueryScopeKeyRef = useRef(
     JSON.stringify({ projectId: activeProjectId ?? null, kind: "all", model: "all" }),
   );
+  const inFlightAssetPagesRef = useRef(new Map<string, Promise<AssetPagePayload>>());
   const pageRequestOwner = useMemo<GalleryPageRequestOwner>(
-    () => ({ pendingAppends: new Set(), appendedOffsets: new Set(), inFlight: new Map() }),
+    () => ({ pendingAppends: new Set(), appendedOffsets: new Set(), inFlight: inFlightAssetPagesRef.current }),
     [assetQueryScopeKey, favoritesOnly],
   );
-  // A fresh owner also invalidates requests from an earlier visit to the same query.
+  // A fresh owner prevents earlier query visits from applying stale responses.
   const currentPageRequestOwnerRef = useRef<GalleryPageRequestOwner | null>(pageRequestOwner);
   currentPageRequestOwnerRef.current = pageRequestOwner;
   useEffect(() => {
@@ -209,6 +212,7 @@ export function useStudioGalleryFeed({
     assetFeedHasMore,
     assetFeedNextOffset,
     loadingMoreAssets,
+    firstGalleryPageFailed,
     prefetchedAssetPage,
     favoritesOnly,
     favoriteAssetFeedHasMore,
@@ -229,6 +233,7 @@ export function useStudioGalleryFeed({
     setFavoriteAssetFeedNextOffset,
     setPrefetchedFavoriteAssetPage,
     setLoadingMoreFavoriteAssets,
+    setFirstGalleryPageFailed,
   });
 
   const galleryScrollLoader = useStudioGalleryScrollLoader({
@@ -350,6 +355,7 @@ export function useStudioGalleryFeed({
     setPrefetchedFavoriteAssetPage,
     setPrefetchingAssetPage,
     setPrefetchingFavoriteAssetPage,
+    setFirstGalleryPageFailed,
   });
 
   function activateGalleryKindFilter(nextKind: GalleryKindFilter) {
@@ -376,6 +382,7 @@ export function useStudioGalleryFeed({
       assetFeedHasMore,
       assetFeedNextOffset,
       loadingMoreAssets,
+      firstGalleryPageFailed,
       localLatestAsset,
       galleryModelFilter,
       galleryKindFilter,

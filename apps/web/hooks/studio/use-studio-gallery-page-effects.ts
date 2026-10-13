@@ -45,6 +45,7 @@ type StudioGalleryPageEffectsOptions = {
   setPrefetchedFavoriteAssetPage: (value: AssetPagePayload | null) => void;
   setPrefetchingAssetPage: (value: boolean) => void;
   setPrefetchingFavoriteAssetPage: (value: boolean) => void;
+  setFirstGalleryPageFailed: (value: boolean) => void;
 };
 
 export function useStudioGalleryPageEffects({
@@ -78,6 +79,7 @@ export function useStudioGalleryPageEffects({
   setPrefetchedFavoriteAssetPage,
   setPrefetchingAssetPage,
   setPrefetchingFavoriteAssetPage,
+  setFirstGalleryPageFailed,
 }: StudioGalleryPageEffectsOptions) {
   const assetQueryScopeKey = useMemo(
     () => JSON.stringify({ projectId: activeProjectId ?? null, kind: galleryKindFilter, model: galleryModelFilter }),
@@ -96,12 +98,17 @@ export function useStudioGalleryPageEffects({
       return;
     }
     let cancelled = false;
+    setFirstGalleryPageFailed(false);
     setPrefetchedAssetPage(null);
     setAssetFeedHasMore(false);
     setAssetFeedNextOffset(null);
     void fetchAssetPage({ offset: 0, limitOverride: INITIAL_ASSET_PAGE_SIZE, silent: true })
       .then((payload) => {
-        if (cancelled || !payload) {
+        if (cancelled) {
+          return;
+        }
+        if (!payload) {
+          setFirstGalleryPageFailed(true);
           return;
         }
         setLocalAssets(payload.assets ?? []);
@@ -123,13 +130,18 @@ export function useStudioGalleryPageEffects({
       return;
     }
     let cancelled = false;
+    setFirstGalleryPageFailed(false);
     setFavoritesLoading(true);
     setFavoriteAssetFeedHasMore(false);
     setFavoriteAssetFeedNextOffset(null);
     setPrefetchedFavoriteAssetPage(null);
     void fetchAssetPage({ offset: 0, favorited: true, limitOverride: INITIAL_ASSET_PAGE_SIZE })
       .then((payload) => {
-        if (cancelled || !payload) {
+        if (cancelled) {
+          return;
+        }
+        if (!payload) {
+          setFirstGalleryPageFailed(true);
           return;
         }
         setFavoriteAssets(payload.assets ?? []);

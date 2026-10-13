@@ -2081,6 +2081,7 @@ export function MediaStudio({
             immersive={immersive}
             galleryTiles={renderedGalleryTiles}
             activeGalleryHasMore={renderedGalleryHasMore}
+            firstGalleryPageFailed={gallery.state.firstGalleryPageFailed}
             activeGalleryLoadingMore={renderedGalleryLoadingMore}
             selectedAssetId={selectedAssetId}
             favoriteAssetIdBusy={favoriteAssetIdBusy}
