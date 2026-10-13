@@ -14,7 +14,15 @@ import {
 } from "@/lib/studio-gallery-feed";
 import type { MediaAsset } from "@/lib/types";
 
+export type GalleryPageRequestOwner = {
+  pendingAppends: Set<number>;
+  appendedOffsets: Set<number>;
+  inFlight: Map<string, Promise<AssetPagePayload>>;
+};
+
 type GalleryPageActionParams = {
+  requestOwner: GalleryPageRequestOwner;
+  isCurrentQuery: () => boolean;
   activeProjectId: string | null;
   assetPageLimit: number;
   assetFeedHasMore: boolean;
@@ -78,6 +86,8 @@ export function buildStudioGalleryAssetPageParams({
 }
 
 export function createStudioGalleryPageActions({
+  requestOwner,
+  isCurrentQuery,
   activeProjectId,
   assetPageLimit,
   assetFeedHasMore,
@@ -115,6 +125,9 @@ export function createStudioGalleryPageActions({
     limitOverride?: number;
     silent?: boolean;
   }): Promise<AssetPagePayload | null> {
+    if (!isCurrentQuery()) {
+      return null;
+    }
     const params = buildStudioGalleryAssetPageParams({
       activeProjectId,
       offset,
@@ -124,19 +137,30 @@ export function createStudioGalleryPageActions({
       galleryModelFilter,
     });
 
-    try {
-      const response = await fetch(`/api/control/media-assets?${params.toString()}`, {
-        method: "GET",
-        headers: { Accept: "application/json" },
-        cache: "no-store",
+    const requestKey = params.toString();
+    let request = requestOwner.inFlight.get(requestKey);
+    if (!request) {
+      request = (async () => {
+        const response = await fetch(`/api/control/media-assets?${requestKey}`, {
+          method: "GET",
+          headers: { Accept: "application/json" },
+          cache: "no-store",
+        });
+        const payload = (await response.json()) as AssetPagePayload;
+        if (!response.ok || !payload.ok) {
+          throw new Error(payload.error ?? "Unable to load media assets from the dashboard.");
+        }
+        return payload;
+      })().finally(() => {
+        requestOwner.inFlight.delete(requestKey);
       });
-      const payload = (await response.json()) as AssetPagePayload;
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.error ?? "Unable to load media assets from the dashboard.");
-      }
-      return payload;
+      requestOwner.inFlight.set(requestKey, request);
+    }
+    try {
+      const payload = await request;
+      return isCurrentQuery() ? payload : null;
     } catch (error) {
-      if (!silent) {
+      if (!silent && isCurrentQuery()) {
         onMessage({
           tone: "danger",
           text: error instanceof Error ? error.message : "The dashboard could not load more media assets.",
@@ -146,7 +170,24 @@ export function createStudioGalleryPageActions({
     }
   }
 
+  function claimAppendedPage(page: AssetPagePayload, expectedOffset: number | null) {
+    if (!isCurrentQuery()) {
+      return false;
+    }
+    const offset = page.offset ?? expectedOffset;
+    if (offset != null) {
+      if (requestOwner.appendedOffsets.has(offset)) {
+        return false;
+      }
+      requestOwner.appendedOffsets.add(offset);
+    }
+    return true;
+  }
+
   function applyLoadedAssetPage(page: AssetPagePayload) {
+    if (!claimAppendedPage(page, assetFeedNextOffset)) {
+      return;
+    }
     const pageAssets = page.assets ?? [];
     setLocalAssets((current) => mergeAssetCollections(current, pageAssets));
     setAssetFeedHasMore(Boolean(page.has_more));
@@ -155,6 +196,10 @@ export function createStudioGalleryPageActions({
   }
 
   function applyRefreshedAssetPage(page: AssetPagePayload) {
+    if (!isCurrentQuery()) {
+      return;
+    }
+    requestOwner.appendedOffsets.clear();
     const pageAssets = page.assets ?? [];
     setLocalAssets((current) => reconcileAssetCollections(pageAssets, current));
     setAssetFeedHasMore(Boolean(page.has_more));
@@ -166,6 +211,9 @@ export function createStudioGalleryPageActions({
   }
 
   function applyLoadedFavoriteAssetPage(page: AssetPagePayload) {
+    if (!claimAppendedPage(page, favoriteAssetFeedNextOffset)) {
+      return;
+    }
     const pageAssets = page.assets ?? [];
     setFavoriteAssets((current) => mergeAssetCollections(current ?? [], pageAssets));
     setFavoriteAssetFeedHasMore(Boolean(page.has_more));
@@ -174,6 +222,10 @@ export function createStudioGalleryPageActions({
   }
 
   function applyRefreshedFavoriteAssetPage(page: AssetPagePayload) {
+    if (!isCurrentQuery()) {
+      return;
+    }
+    requestOwner.appendedOffsets.clear();
     const pageAssets = page.assets ?? [];
     setFavoriteAssets((current) => reconcileAssetCollections(pageAssets, current ?? []));
     setFavoriteAssetFeedHasMore(Boolean(page.has_more));
@@ -221,9 +273,18 @@ export function createStudioGalleryPageActions({
   }
 
   async function loadMoreGalleryAssets() {
-    if (favoritesOnly || loadingMoreAssets || !assetFeedHasMore || assetFeedNextOffset == null) {
+    if (
+      !isCurrentQuery() ||
+      favoritesOnly ||
+      loadingMoreAssets ||
+      !assetFeedHasMore ||
+      assetFeedNextOffset == null ||
+      requestOwner.pendingAppends.has(assetFeedNextOffset) ||
+      requestOwner.appendedOffsets.has(assetFeedNextOffset)
+    ) {
       return;
     }
+    requestOwner.pendingAppends.add(assetFeedNextOffset);
     setLoadingMoreAssets(true);
     try {
       if (prefetchedAssetPage && prefetchedAssetPage.offset === assetFeedNextOffset) {
@@ -236,14 +297,26 @@ export function createStudioGalleryPageActions({
       }
       applyLoadedAssetPage(page);
     } finally {
-      setLoadingMoreAssets(false);
+      requestOwner.pendingAppends.delete(assetFeedNextOffset);
+      if (isCurrentQuery()) {
+        setLoadingMoreAssets(false);
+      }
     }
   }
 
   async function loadMoreFavoriteGalleryAssets() {
-    if (!favoritesOnly || loadingMoreFavoriteAssets || !favoriteAssetFeedHasMore || favoriteAssetFeedNextOffset == null) {
+    if (
+      !isCurrentQuery() ||
+      !favoritesOnly ||
+      loadingMoreFavoriteAssets ||
+      !favoriteAssetFeedHasMore ||
+      favoriteAssetFeedNextOffset == null ||
+      requestOwner.pendingAppends.has(favoriteAssetFeedNextOffset) ||
+      requestOwner.appendedOffsets.has(favoriteAssetFeedNextOffset)
+    ) {
       return;
     }
+    requestOwner.pendingAppends.add(favoriteAssetFeedNextOffset);
     setLoadingMoreFavoriteAssets(true);
     try {
       if (prefetchedFavoriteAssetPage && prefetchedFavoriteAssetPage.offset === favoriteAssetFeedNextOffset) {
@@ -260,16 +333,18 @@ export function createStudioGalleryPageActions({
       }
       applyLoadedFavoriteAssetPage(page);
     } finally {
-      setLoadingMoreFavoriteAssets(false);
+      requestOwner.pendingAppends.delete(favoriteAssetFeedNextOffset);
+      if (isCurrentQuery()) {
+        setLoadingMoreFavoriteAssets(false);
+      }
     }
   }
 
   function loadMoreActiveGalleryAssets() {
     if (favoritesOnly) {
-      void loadMoreFavoriteGalleryAssets();
-      return;
+      return loadMoreFavoriteGalleryAssets();
     }
-    void loadMoreGalleryAssets();
+    return loadMoreGalleryAssets();
   }
 
   function applyFavoriteAssetUpdate(updatedAsset: MediaAsset) {

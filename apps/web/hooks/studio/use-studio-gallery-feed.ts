@@ -13,7 +13,10 @@ import {
   upsertBatchCollection,
 } from "@/lib/studio-gallery";
 import type { MediaAsset, MediaBatch, MediaJob } from "@/lib/types";
-import { createStudioGalleryPageActions } from "@/hooks/studio/use-studio-gallery-page-actions";
+import {
+  createStudioGalleryPageActions,
+  type GalleryPageRequestOwner,
+} from "@/hooks/studio/use-studio-gallery-page-actions";
 import { useStudioGalleryPageEffects } from "@/hooks/studio/use-studio-gallery-page-effects";
 import { useStudioGalleryScrollLoader } from "@/hooks/studio/use-studio-gallery-scroll-loader";
 export { isDefaultStudioGalleryQuery } from "@/lib/studio-gallery-feed";
@@ -153,6 +156,23 @@ export function useStudioGalleryFeed({
   const initialAssetQueryScopeKeyRef = useRef(
     JSON.stringify({ projectId: activeProjectId ?? null, kind: "all", model: "all" }),
   );
+  const pageRequestOwner = useMemo<GalleryPageRequestOwner>(
+    () => ({ pendingAppends: new Set(), appendedOffsets: new Set(), inFlight: new Map() }),
+    [assetQueryScopeKey, favoritesOnly],
+  );
+  // A fresh owner also invalidates requests from an earlier visit to the same query.
+  const currentPageRequestOwnerRef = useRef<GalleryPageRequestOwner | null>(pageRequestOwner);
+  currentPageRequestOwnerRef.current = pageRequestOwner;
+  useEffect(() => {
+    currentPageRequestOwnerRef.current = pageRequestOwner;
+    setLoadingMoreAssets(false);
+    setLoadingMoreFavoriteAssets(false);
+    return () => {
+      if (currentPageRequestOwnerRef.current === pageRequestOwner) {
+        currentPageRequestOwnerRef.current = null;
+      }
+    };
+  }, [pageRequestOwner]);
   const galleryTiles = useMemo(
     () =>
       buildGalleryTiles(
@@ -182,6 +202,8 @@ export function useStudioGalleryFeed({
   );
 
   const pageActions = createStudioGalleryPageActions({
+    requestOwner: pageRequestOwner,
+    isCurrentQuery: () => currentPageRequestOwnerRef.current === pageRequestOwner,
     activeProjectId,
     assetPageLimit,
     assetFeedHasMore,
@@ -303,12 +325,10 @@ export function useStudioGalleryFeed({
     assetFeedHasMore,
     assetFeedNextOffset,
     loadingMoreAssets,
-    prefetchingAssetPage,
     prefetchedAssetPage,
     favoriteAssetFeedHasMore,
     favoriteAssetFeedNextOffset,
     loadingMoreFavoriteAssets,
-    prefetchingFavoriteAssetPage,
     prefetchedFavoriteAssetPage,
     favoritesOnly,
     galleryKindFilter,
@@ -392,7 +412,7 @@ export function useStudioGalleryFeed({
       setFavoriteAssets,
       activateGalleryKindFilter,
       toggleFavoritesFilter,
-      loadMoreActiveGalleryAssets: async () => pageActions.loadMoreActiveGalleryAssets(),
+      loadMoreActiveGalleryAssets: pageActions.loadMoreActiveGalleryAssets,
       refreshActiveGalleryAssets: pageActions.refreshActiveGalleryAssets,
       upsertBatch: (batch) => setLocalBatches((current) => upsertBatchCollection(current, batch)),
       mergeAssetIntoCollection: pageActions.mergeAssetIntoCollection,

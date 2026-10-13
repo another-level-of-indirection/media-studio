@@ -15,12 +15,10 @@ type StudioGalleryPageEffectsOptions = {
   assetFeedHasMore: boolean;
   assetFeedNextOffset: number | null;
   loadingMoreAssets: boolean;
-  prefetchingAssetPage: boolean;
   prefetchedAssetPage: AssetPagePayload | null;
   favoriteAssetFeedHasMore: boolean;
   favoriteAssetFeedNextOffset: number | null;
   loadingMoreFavoriteAssets: boolean;
-  prefetchingFavoriteAssetPage: boolean;
   prefetchedFavoriteAssetPage: AssetPagePayload | null;
   favoritesOnly: boolean;
   galleryKindFilter: GalleryKindFilter;
@@ -55,12 +53,10 @@ export function useStudioGalleryPageEffects({
   assetFeedHasMore,
   assetFeedNextOffset,
   loadingMoreAssets,
-  prefetchingAssetPage,
   prefetchedAssetPage,
   favoriteAssetFeedHasMore,
   favoriteAssetFeedNextOffset,
   loadingMoreFavoriteAssets,
-  prefetchingFavoriteAssetPage,
   prefetchedFavoriteAssetPage,
   favoritesOnly,
   galleryKindFilter,
@@ -87,18 +83,22 @@ export function useStudioGalleryPageEffects({
     () => JSON.stringify({ projectId: activeProjectId ?? null, kind: galleryKindFilter, model: galleryModelFilter }),
     [activeProjectId, galleryKindFilter, galleryModelFilter],
   );
-  const skippedInitialAssetPageFetchRef = useRef(false);
+  const serverSeedQueryScopeRef = useRef(skipInitialAssetPageFetch ? assetQueryScopeKey : null);
 
   useEffect(() => {
+    if (favoritesOnly || assetQueryScopeKey !== serverSeedQueryScopeRef.current) {
+      serverSeedQueryScopeRef.current = null;
+    }
     if (favoritesOnly) {
       return;
     }
-    if (skipInitialAssetPageFetch && !skippedInitialAssetPageFetchRef.current) {
-      skippedInitialAssetPageFetchRef.current = true;
+    if (skipInitialAssetPageFetch && serverSeedQueryScopeRef.current === assetQueryScopeKey) {
       return;
     }
     let cancelled = false;
     setPrefetchedAssetPage(null);
+    setAssetFeedHasMore(false);
+    setAssetFeedNextOffset(null);
     void fetchAssetPage({ offset: 0, limitOverride: INITIAL_ASSET_PAGE_SIZE, silent: true })
       .then((payload) => {
         if (cancelled || !payload) {
@@ -124,6 +124,9 @@ export function useStudioGalleryPageEffects({
     }
     let cancelled = false;
     setFavoritesLoading(true);
+    setFavoriteAssetFeedHasMore(false);
+    setFavoriteAssetFeedNextOffset(null);
+    setPrefetchedFavoriteAssetPage(null);
     void fetchAssetPage({ offset: 0, favorited: true, limitOverride: INITIAL_ASSET_PAGE_SIZE })
       .then((payload) => {
         if (cancelled || !payload) {
@@ -151,7 +154,6 @@ export function useStudioGalleryPageEffects({
       !assetFeedHasMore ||
       assetFeedNextOffset == null ||
       loadingMoreAssets ||
-      prefetchingAssetPage ||
       prefetchedAssetPage
     ) {
       return;
@@ -182,6 +184,7 @@ export function useStudioGalleryPageEffects({
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
+      setPrefetchingAssetPage(false);
     };
   }, [
     activeProjectId,
@@ -190,9 +193,10 @@ export function useStudioGalleryPageEffects({
     assetPageLimit,
     favoritesOnly,
     galleryScrollArmed,
+    galleryKindFilter,
+    galleryModelFilter,
     loadingMoreAssets,
     prefetchedAssetPage,
-    prefetchingAssetPage,
   ]);
 
   useEffect(() => {
@@ -202,7 +206,6 @@ export function useStudioGalleryPageEffects({
       !favoriteAssetFeedHasMore ||
       favoriteAssetFeedNextOffset == null ||
       loadingMoreFavoriteAssets ||
-      prefetchingFavoriteAssetPage ||
       prefetchedFavoriteAssetPage
     ) {
       return;
@@ -238,6 +241,7 @@ export function useStudioGalleryPageEffects({
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
+      setPrefetchingFavoriteAssetPage(false);
     };
   }, [
     favoriteAssetFeedHasMore,
@@ -249,6 +253,5 @@ export function useStudioGalleryPageEffects({
     activeProjectId,
     loadingMoreFavoriteAssets,
     prefetchedFavoriteAssetPage,
-    prefetchingFavoriteAssetPage,
   ]);
 }

@@ -82,8 +82,11 @@ export function useStudioGalleryScrollLoader({
         loadMoreAssetsRef.current();
       }
     };
-    window.setTimeout(maybeLoadMore, 0);
-    return () => observer.disconnect();
+    const timer = window.setTimeout(maybeLoadMore, 0);
+    return () => {
+      window.clearTimeout(timer);
+      observer.disconnect();
+    };
   }, [
     activeGalleryHasMore,
     activeGalleryLoadingMore,
