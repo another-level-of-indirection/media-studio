@@ -380,13 +380,15 @@ it("stops a delayed clarification refresh without replacing the cancelled sessio
 
 it.each(['response', 'followup', 'unconfirmed'])('recovers saved-artifact graph planning after %s loss without erasing an unrelated draft or repeating the request', async (failure) => {
     let requested = false, failedRead = false, online = failure !== 'unconfirmed', requestText = '';
+    let resolveInitialProgress!: () => void;
+    const initialProgress = new Promise<void>((resolve) => { resolveInitialProgress = resolve; });
     const originalWorkflow = { ...workflow, nodes: [{ id: 'existing', type: 'utility.note', position: { x: 0, y: 0 }, fields: { text: 'Keep this existing graph.' } }] };
     const recoveredPlan = { ...plan, graph_plan: { ...plan.graph_plan, operations: [{ op: 'add_node', node_ref: 'prompt', node_type: 'prompt.text', title: 'Amber prompt', fields: { text: 'Keep amber light' }, position: { x: 0, y: 0 } }], metadata: { kernel_proposal: true, independent_stage: true, source_workflow_id: 'workflow-1' } }, workflow: { ...workflow, workflow_id: null, nodes: [{ id: 'prompt', type: 'prompt.text', position: { x: 0, y: 0 }, fields: { text: 'Keep amber light' } }] } };
     const initial = { ...session, messages: [savedRecipeMessage] };
     const refreshed = () => ({ ...session, messages: [savedRecipeMessage, { ...savedRecipeGraphRequestMessage, content_text: requestText }, { assistant_message_id: 'recovered', assistant_session_id: 'session-1', role: 'assistant', content_text: 'Prepared a graph for review.', content_json: { mode: 'assistant_kernel', next_action: { kind: 'confirm_graph', label: 'Add to canvas', proposal_id: 'plan-1', confirmation_token: 'confirm-plan-1', requires_confirmation: true, payload: { proposal_id: 'plan-1', confirmation_token: 'confirm-plan-1' } } } }], latest_plan: recoveredPlan });
     const fetcher = vi.fn((url: string, init?: RequestInit) => {
         if (url.endsWith('/progress'))
-            return jsonResponse(assistantIdleProgress);
+            return initialProgress.then(() => jsonResponse(assistantIdleProgress));
         if (url.endsWith('/plans')) {
             requested = true;
             requestText = JSON.parse(String(init?.body)).message;
@@ -409,6 +411,12 @@ it.each(['response', 'followup', 'unconfirmed'])('recovers saved-artifact graph 
     const onApply = vi.fn();
     render(<CreativeAssistantPanel open workspaceKey="plan-recovery" initialAssistantSessionId="session-1" workflowId="workflow-1" workflowName="Assistant Graph" workflow={originalWorkflow} references={[]} importImageFile={vi.fn()} onApplyWorkflow={onApply} onClose={vi.fn()}/>);
     const create = await screen.findByRole('button', { name: 'Replace current graph with Storyboard Writer' });
+    // Saved messages render before the initial progress check makes their actions available.
+    expect(create).toHaveProperty('disabled', true);
+    fireEvent.click(create);
+    expect(fetcher.mock.calls.some(([url]) => url.endsWith('/plans'))).toBe(false);
+    await act(async () => { resolveInitialProgress(); });
+    await waitFor(() => expect(create).toHaveProperty('disabled', false));
     fireEvent.change(screen.getByRole('textbox', { name: 'Assistant message' }), { target: { value: 'My unrelated unsent creative note.' } });
     fireEvent.click(create);
     if (failure === 'unconfirmed') {
