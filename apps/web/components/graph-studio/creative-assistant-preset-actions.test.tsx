@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 
 import { CreativeAssistantPanel } from "./creative-assistant-panel";
@@ -388,17 +388,20 @@ it("does not return to Create test graph after the paid test run starts", async 
 });
 
 it("keeps Create test graph for a fresh draft when the workflow has an older run", async () => {
-  renderPresetSession("tab-old-run", {
-    ...session,
-    summary_json: {
-      kernel_preset_draft: {
-        label: "New field guide",
-        rules_json: { preset_lane: "text_to_image" },
-        input_slots_json: [],
+  // Flush saved-session hydration before asserting actions derived from its draft.
+  await act(async () => {
+    renderPresetSession("tab-old-run", {
+      ...session,
+      summary_json: {
+        kernel_preset_draft: {
+          label: "New field guide",
+          rules_json: { preset_lane: "text_to_image" },
+          input_slots_json: [],
+        },
       },
-    },
-    messages: [],
-  }, { id: "run-old", status: "completed" });
+      messages: [],
+    }, { id: "run-old", status: "completed" });
+  });
 
-  expect(await screen.findByRole("button", { name: "Create test graph" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Create test graph" })).toBeTruthy();
 });
