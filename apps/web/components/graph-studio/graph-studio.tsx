@@ -75,6 +75,7 @@ import {
   useGraphRunLifecycle,
   type GraphValidationError,
 } from "./hooks/use-graph-run-lifecycle";
+import { useGraphWorkflowRunPreview } from "./hooks/use-graph-workflow-run-preview";
 import { useGraphWorkflowActions } from "./hooks/use-graph-workflow-actions";
 import { useGraphWorkflowMenuState } from "./hooks/use-graph-workflow-menu-state";
 import { useGraphToolbarWorkflowActions } from "./hooks/use-graph-toolbar-workflow-actions";
@@ -135,7 +136,6 @@ import {
   blankGraphWorkflowPayload,
   graphWorkflowDirtyState,
   graphWorkflowSnapshotSignature,
-  graphWorkflowSnapshotsMatch,
   shouldReloadSavedWorkflowRecordOnRestore,
 } from "./utils/graph-tabs";
 import { hydrateGraphWorkflowForCanvas } from "./utils/graph-workflow-hydration";
@@ -1139,73 +1139,11 @@ function GraphStudioClient() {
     nodeHandlers, setNodes, setEdges, setGroups, activeTabIdRef, workspaceRestoreVersionRef, currentHistorySnapshotRef,
   });
 
-  const hydrateLastRun = useCallback(
-    async (runId: string, preloadedRun?: GraphRun) => {
-      try {
-        const current =
-          preloadedRun ??
-          (await jsonFetch<GraphRun>(`/api/control/media/graph/runs/${runId}`));
-        setRun(current);
-        applyRunNodesToCanvas(current);
-        await refreshImageAssets().catch(() => undefined);
-        await refreshAssetsByIds(assetIdsFromGraphRun(current)).catch(
-          () => undefined,
-        );
-        await refreshReferenceMedia().catch(() => undefined);
-        const events = await jsonFetch<{ items: GraphRunEvent[] }>(
-          `/api/control/media/graph/runs/${runId}/events`,
-        );
-        if (events.items.length) {
-          applyRunEventsToCanvas(events.items, current);
-          setConsoleLines(formatGraphRunEventsForConsole(events.items, nodes));
-        }
-      } catch (error) {
-        appendConsole(
-          `Last run could not be restored: ${(error as Error).message}`,
-        );
-      }
-    },
-    [
-      appendConsole,
-      applyRunEventsToCanvas,
-      applyRunNodesToCanvas,
-      nodes,
-      refreshAssetsByIds,
-      refreshImageAssets,
-      refreshReferenceMedia,
-    ],
-  );
-
-  const hydrateLatestRunForWorkflow = useCallback(
-    async (
-      targetWorkflowId: string,
-      currentWorkflow?: GraphWorkflowPayload | null,
-    ) => {
-      const payload = await jsonFetch<{ items?: GraphRunHistoryItem[] }>(
-        "/api/control/media/graph/runs/summary?limit=15",
-      );
-      const latestRunSummary = payload.items?.find(
-        (item) => item.workflow_id === targetWorkflowId,
-      );
-      if (latestRunSummary?.run_id) {
-        const latestRun = await jsonFetch<GraphRun>(
-          `/api/control/media/graph/runs/${latestRunSummary.run_id}`,
-        );
-        if (
-          currentWorkflow &&
-          latestRun.workflow_json &&
-          !graphWorkflowSnapshotsMatch(currentWorkflow, latestRun.workflow_json)
-        ) {
-          appendConsole(
-            `Skipped last-run restore for ${currentWorkflow.name} because the latest run came from a different workflow state.`,
-          );
-          return;
-        }
-        await hydrateLastRun(latestRunSummary.run_id, latestRun);
-      }
-    },
-    [appendConsole, hydrateLastRun],
-  );
+  const { hydrateLastRun, hydrateLatestRunForWorkflow } = useGraphWorkflowRunPreview({
+    appendConsole, applyRunEventsToCanvas, applyRunNodesToCanvas, nodes,
+    refreshAssetsByIds, refreshImageAssets, refreshReferenceMedia, setRun, setConsoleLines,
+    workspaceRestoreVersionRef,
+  });
 
   const loadWorkflowRecord = useCallback(
     async (record: GraphWorkflowRecord, selectionIsCurrent: () => boolean = () => true) => {
@@ -1289,8 +1227,9 @@ function GraphStudioClient() {
       canvasHydrated.current = true;
       setSidebarDialog(null);
       appendConsole(`Loaded workflow ${nextWorkflowName}.`);
-      void hydrateLatestRunForWorkflow(record.workflow_id, savedWorkflow).catch(
+      void hydrateLatestRunForWorkflow(record.workflow_id, savedWorkflow, loadVersion).catch(
         (error) => {
+          if (!restoreVersionIsCurrent(loadVersion)) return;
           appendConsole(
             `Latest run preview could not be restored: ${(error as Error).message}`,
           );
