@@ -26,6 +26,7 @@ import type {
   GraphWorkflowPayload,
 } from "../types";
 import { JsonFetchError, jsonFetch, requestRejectionMessage } from "../utils/graph-api";
+import { readGraphStartup } from "../utils/graph-startup-reads";
 import { blankGraphWorkflowPayload, graphWorkflowSnapshotSignature } from "../utils/graph-tabs";
 import { buildCreativeAssistantCanvasContext } from "../utils/creative-assistant-canvas-context";
 
@@ -600,15 +601,14 @@ export function useCreativeAssistant({
     return () => controller.abort();
   }, [enabled, initialAssistantSessionId, loadExistingSession, reportOperationFailure, requestedSessionChanged, session, workflowId]);
 
-  const refreshProviderReadiness = useCallback(async () => {
+  const refreshProviderReadiness = useCallback(async (options?: { startup?: boolean }) => {
     providerHealthControllerRef.current?.abort();
     const controller = new AbortController();
     providerHealthControllerRef.current = controller;
     setProviderReadiness((current) => ({ ...current, checked: false, loading: true, error: null }));
     try {
-      const response = await fetch("/api/control/health", { cache: "no-store", signal: controller.signal });
-      if (!response.ok) throw new Error(`Health check returned ${response.status}.`);
-      const payload = (await response.json()) as ControlApiHealthData;
+      // Cancellation belongs to this consumer; it must not abort another consumer's shared health read.
+      const payload = await readGraphStartup<ControlApiHealthData>("/api/control/health", !options?.startup);
       if (controller.signal.aborted) return;
       const readiness = providerReadinessFromHealth(payload).codexLocal;
       setProviderReadiness({ checked: true, loading: false, error: null, ...readiness });
@@ -621,7 +621,7 @@ export function useCreativeAssistant({
 
   useEffect(() => {
     if (!enabled) return;
-    void refreshProviderReadiness();
+    void refreshProviderReadiness({ startup: true });
     return () => providerHealthControllerRef.current?.abort();
   }, [enabled, refreshProviderReadiness]);
 

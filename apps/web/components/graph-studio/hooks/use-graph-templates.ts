@@ -1,14 +1,18 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { GraphTemplateRecord, GraphWorkflowPayload, GraphWorkflowRecord } from "../types";
 import { jsonFetch } from "../utils/graph-api";
+import { readGraphStartup } from "../utils/graph-startup-reads";
 
 export function useGraphTemplates({ appendConsole }: { appendConsole: (line: string) => void }) {
   const [templates, setTemplates] = useState<GraphTemplateRecord[]>([]);
+  const readRevision = useRef(0);
+  useEffect(() => () => { readRevision.current += 1; }, []);
 
-  const refreshTemplates = useCallback(async () => {
-    const payload = await jsonFetch<{ items?: GraphTemplateRecord[] }>("/api/control/media/graph/templates");
-    setTemplates(payload.items ?? []);
+  const refreshTemplates = useCallback(async (options?: { startup?: boolean }) => {
+    const revision = ++readRevision.current;
+    const payload = await readGraphStartup<{ items?: GraphTemplateRecord[] }>("/api/control/media/graph/templates", !options?.startup);
+    if (revision === readRevision.current) setTemplates(payload.items ?? []);
   }, []);
 
   const saveWorkflowAsTemplate = useCallback(

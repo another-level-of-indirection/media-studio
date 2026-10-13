@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { isGraphAssistantAvailable, isGraphAssistantDebugEnabled } from "@/lib/graph-assistant-debug";
 import type { ControlApiHealthData } from "@/lib/types";
+import { readGraphStartup } from "../utils/graph-startup-reads";
 
 export type GraphAssistantAvailability = "checking" | "disabled" | "missing" | "signed_out" | "unready" | "error" | "ready";
 
@@ -20,11 +21,7 @@ export function useGraphAssistantAvailability() {
       return;
     }
     let cancelled = false;
-    fetch("/api/control/health", { cache: "no-store" })
-      .then(async (response) => {
-        if (!response.ok) throw new Error(`Health check returned ${response.status}.`);
-        return (await response.json()) as ControlApiHealthData;
-      })
+    readGraphStartup<ControlApiHealthData>("/api/control/health", revision > 0)
       .then((health) => {
         if (cancelled) return;
         setStatus(

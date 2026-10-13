@@ -1547,13 +1547,13 @@ function GraphStudioClient() {
   }, [appendConsole, reloadNodeDefinitions]);
 
   useEffect(() => {
-    refreshWorkflows().catch((error) =>
+    refreshWorkflows({ startup: true }).catch((error) =>
       appendConsole(`Failed to load workflows: ${error.message}`),
     );
-    refreshTemplates().catch((error) =>
+    refreshTemplates({ startup: true }).catch((error) =>
       appendConsole(`Failed to load templates: ${error.message}`),
     );
-    void refreshCredits();
+    void refreshCredits({ startup: true });
   }, [appendConsole, refreshCredits, refreshTemplates, refreshWorkflows]);
 
   useEffect(() => {

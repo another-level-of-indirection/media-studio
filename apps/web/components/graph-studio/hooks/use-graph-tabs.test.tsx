@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GraphWorkspaceTab, GraphWorkflowPayload } from "../types";
 import { writeGraphTabSession } from "../utils/graph-tabs";
 import { useGraphTabs } from "./use-graph-tabs";
+import { __resetGraphStartupReadsForTests } from "../utils/graph-startup-reads";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -61,6 +62,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  __resetGraphStartupReadsForTests();
   vi.unstubAllGlobals();
   localStorageMock.clear();
   window.history.replaceState(null, "", "/");

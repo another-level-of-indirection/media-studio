@@ -1,7 +1,9 @@
 import type { AssistantSession, GraphWorkflowPayload } from "./types";
 import { beforeEach, vi } from "vitest";
+import { __resetGraphStartupReadsForTests } from "./utils/graph-startup-reads";
 
 beforeEach(() => {
+  __resetGraphStartupReadsForTests();
   vi.stubGlobal("ResizeObserver", class {
     observe() {}
     disconnect() {}

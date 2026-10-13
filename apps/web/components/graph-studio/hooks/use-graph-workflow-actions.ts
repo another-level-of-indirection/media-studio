@@ -1,7 +1,8 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { GraphRun, GraphWorkflowPayload, GraphWorkflowRecord, StudioEdge, StudioNode } from "../types";
 import { jsonFetch } from "../utils/graph-api";
+import { readGraphStartup } from "../utils/graph-startup-reads";
 
 export function useGraphWorkflowActions({
   workflowId,
@@ -41,10 +42,13 @@ export function useGraphWorkflowActions({
   appendConsole: (line: string) => void;
 }) {
   const [workflows, setWorkflows] = useState<GraphWorkflowRecord[]>([]);
+  const readRevision = useRef(0);
+  useEffect(() => () => { readRevision.current += 1; }, []);
 
-  const refreshWorkflows = useCallback(async () => {
-    const payload = await jsonFetch<{ items?: GraphWorkflowRecord[] }>("/api/control/media/graph/workflows");
-    setWorkflows(payload.items ?? []);
+  const refreshWorkflows = useCallback(async (options?: { startup?: boolean }) => {
+    const revision = ++readRevision.current;
+    const payload = await readGraphStartup<{ items?: GraphWorkflowRecord[] }>("/api/control/media/graph/workflows", !options?.startup);
+    if (revision === readRevision.current) setWorkflows(payload.items ?? []);
   }, []);
 
   const saveWorkflow = useCallback(async (nextName = workflowName, nextWorkflowId = workflowId) => {

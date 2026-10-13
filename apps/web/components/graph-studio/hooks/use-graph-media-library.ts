@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   generatedImagePickerPageUrl,
@@ -6,6 +6,7 @@ import {
 } from "@/components/media/media-image-picker-sources";
 import type { MediaAsset, MediaReference } from "@/lib/types";
 import { creditBalanceFromPayload, jsonFetch } from "../utils/graph-api";
+import { readGraphStartup } from "../utils/graph-startup-reads";
 
 const MEDIA_LIBRARY_REFRESH_TTL_MS = 4000;
 const GRAPH_MEDIA_LIBRARY_PAGE_LIMIT = 40;
@@ -54,6 +55,8 @@ export function useGraphMediaLibrary() {
   const [assets, setAssets] = useState<MediaAsset[]>([]);
   const [availableCredits, setAvailableCredits] = useState<number | null>(null);
   const [creditsUnavailable, setCreditsUnavailable] = useState(false);
+  const creditReadRevision = useRef(0);
+  useEffect(() => () => { creditReadRevision.current += 1; }, []);
   const imageAssetsPromiseRef = useRef<Promise<void> | null>(null);
   const referenceMediaPromiseRef = useRef<Promise<void> | null>(null);
   const mediaLibraryPromiseRef = useRef<Promise<void> | null>(null);
@@ -62,13 +65,15 @@ export function useGraphMediaLibrary() {
   const imageAssetsLoadedRef = useRef(false);
   const referenceMediaLoadedRef = useRef(false);
 
-  const refreshCredits = useCallback(async () => {
+  const refreshCredits = useCallback(async (options?: { startup?: boolean }) => {
+    const revision = ++creditReadRevision.current;
     try {
-      const payload = await jsonFetch<Record<string, unknown>>("/api/control/media/credits");
+      const payload = await readGraphStartup<Record<string, unknown>>("/api/control/media/credits", !options?.startup);
+      if (revision !== creditReadRevision.current) return;
       setAvailableCredits(creditBalanceFromPayload(payload));
       setCreditsUnavailable(false);
     } catch {
-      setCreditsUnavailable(true);
+      if (revision === creditReadRevision.current) setCreditsUnavailable(true);
     }
   }, []);
 
