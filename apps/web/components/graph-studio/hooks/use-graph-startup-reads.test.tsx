@@ -7,36 +7,28 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useGraphAssistantAvailability } from "./use-graph-assistant-availability";
 import { useGraphTabs } from "./use-graph-tabs";
 import { __resetGraphStartupReadsForTests } from "../utils/graph-startup-reads";
-import { useGraphWorkflowActions } from "./use-graph-workflow-actions";
 import { useGraphTemplates } from "./use-graph-templates";
 import { useGraphMediaLibrary } from "./use-graph-media-library";
 import { useCreativeAssistant } from "./use-creative-assistant";
 import { __resetGraphProviderReadinessCacheForTests, useGraphProviderModelCatalog } from "./use-graph-provider-model-catalog";
 import { assistantTestWorkflow } from "../creative-assistant-test-fixtures";
 
-const workflowProps: Parameters<typeof useGraphWorkflowActions>[0] = {
-  workflowId: null, workflowName: "Test", renameDraft: "Test", nodes: [], edges: [],
-  workflowFromCanvas: () => ({ schema_version: 1, workflow_id: null, name: "Test", nodes: [], edges: [] }),
-  setWorkflowId: vi.fn(), setWorkflowName: vi.fn(), setWorkflowUpdatedAt: vi.fn(),
-  setRun: vi.fn(), setNodes: vi.fn(), setEdges: vi.fn(), setConsoleLines: vi.fn(),
-  setWorkflowMenuOpen: vi.fn(), setRenameDialogOpen: vi.fn(), appendConsole: vi.fn(),
-};
+const appendConsole = vi.fn();
+const templateWorkflow = { schema_version: 1, workflow_id: null, name: "Test", nodes: [], edges: [] };
 
 function useListReads() {
-  const workflows = useGraphWorkflowActions(workflowProps);
-  const templates = useGraphTemplates({ appendConsole: workflowProps.appendConsole });
+  const templates = useGraphTemplates({ appendConsole });
   const credits = useGraphMediaLibrary();
-  return { workflows, templates, credits };
+  return { templates, credits };
 }
 
 function useBootLists() {
-  const { workflows, templates, credits } = useListReads();
+  const { templates, credits } = useListReads();
   useEffect(() => {
-    void workflows.refreshWorkflows({ startup: true });
     void templates.refreshTemplates({ startup: true });
     void credits.refreshCredits({ startup: true });
-  }, [workflows.refreshWorkflows, templates.refreshTemplates, credits.refreshCredits]);
-  return { workflows, templates, credits };
+  }, [templates.refreshTemplates, credits.refreshCredits]);
+  return { templates, credits };
 }
 
 function Replay({ children }: { children: ReactNode }) {
@@ -64,29 +56,25 @@ afterEach(() => {
 });
 
 describe("Graph startup reads", () => {
-  it("refreshes workflow and template lists after saves despite settled startup reuse", async () => {
+  it("refreshes templates after saves despite settled startup reuse", async () => {
     const savedUrls = new Set<string>();
     const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
       if (init?.method === "POST") {
         savedUrls.add(url);
-        return Response.json(url.endsWith("/templates")
-          ? { template_id: "new-template", name: "Saved Template" } : { workflow_id: "new-workflow" });
+        return Response.json({ template_id: "new-template", name: "Saved Template" });
       }
       return Response.json({ items: [{ name: savedUrls.has(url) ? "Saved" : "Before save" }] });
     });
     vi.stubGlobal("fetch", fetcher);
     const { result } = renderHook(useListReads);
     await act(async () => {
-      await result.current.workflows.refreshWorkflows({ startup: true });
       await result.current.templates.refreshTemplates({ startup: true });
     });
     await act(async () => {
-      await result.current.workflows.saveWorkflow();
-      await result.current.templates.saveWorkflowAsTemplate(workflowProps.workflowFromCanvas(null, "Test", [], []));
+      await result.current.templates.saveWorkflowAsTemplate(templateWorkflow);
     });
-    await waitFor(() => expect(result.current.workflows.workflows[0]?.name).toBe("Saved"));
-    expect(result.current.templates.templates[0]?.name).toBe("Saved");
-    expect(fetcher.mock.calls.filter(([, init]) => !init?.method)).toHaveLength(4);
+    await waitFor(() => expect(result.current.templates.templates[0]?.name).toBe("Saved"));
+    expect(fetcher.mock.calls.filter(([, init]) => !init?.method)).toHaveLength(2);
   });
 
   it("restores tabs and availability after a pending effect is cleaned up and replayed", async () => {
@@ -141,7 +129,7 @@ describe("Graph startup reads", () => {
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
-  it.each(["workflows", "templates", "credits"] as const)("keeps a newer %s refresh when the startup response finishes late", async (kind) => {
+  it.each(["templates", "credits"] as const)("keeps a newer %s refresh when the startup response finishes late", async (kind) => {
     let resolveBoot!: (response: Response) => void;
     const pending = new Promise<Response>((resolve) => { resolveBoot = resolve; });
     vi.stubGlobal("fetch", vi.fn().mockReturnValueOnce(pending).mockResolvedValueOnce(Response.json(
@@ -149,7 +137,7 @@ describe("Graph startup reads", () => {
     )));
     const { result } = renderHook(useListReads);
     const refresh = () => kind === "credits" ? result.current.credits.refreshCredits
-      : kind === "templates" ? result.current.templates.refreshTemplates : result.current.workflows.refreshWorkflows;
+      : result.current.templates.refreshTemplates;
     let boot!: Promise<void>;
     act(() => { boot = refresh()({ startup: true }); });
     await act(async () => { await refresh()(); });
@@ -158,8 +146,7 @@ describe("Graph startup reads", () => {
       await boot;
     });
     if (kind === "credits") expect(result.current.credits.availableCredits).toBe(25);
-    else if (kind === "templates") expect(result.current.templates.templates[0]?.name).toBe("Current");
-    else expect(result.current.workflows.workflows[0]?.name).toBe("Current");
+    else expect(result.current.templates.templates[0]?.name).toBe("Current");
   });
 
   it("shares boot lists and credits across concurrent consumers, then refreshes credits after a run", async () => {
@@ -170,13 +157,13 @@ describe("Graph startup reads", () => {
     const first = renderHook(useBootLists, { wrapper: Replay });
     const second = renderHook(useBootLists, { wrapper: Replay });
     await waitFor(() => expect(first.result.current.credits.availableCredits).toBe(80));
-    await waitFor(() => expect(second.result.current.workflows.workflows[0]?.name).toBe("Saved portrait"));
+    await waitFor(() => expect(second.result.current.templates.templates[0]?.name).toBe("Portrait template"));
     expect(first.result.current.templates.templates[0]?.name).toBe("Portrait template");
-    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(fetcher).toHaveBeenCalledTimes(2);
     balance = 65;
     await act(async () => { await first.result.current.credits.refreshCredits(); });
     expect(first.result.current.credits.availableCredits).toBe(65);
-    expect(fetcher).toHaveBeenCalledTimes(4);
+    expect(fetcher).toHaveBeenCalledTimes(3);
   });
 
   it("restores the installation scope and assistant readiness with one health read through effect replay", async () => {

@@ -41,6 +41,7 @@ from .schemas import (
     GraphWorkflow,
     GraphWorkflowListResponse,
     GraphWorkflowRecord,
+    GraphWorkflowSummaryListResponse,
 )
 from .validator import validate_workflow
 
@@ -211,6 +212,15 @@ def list_workflows() -> GraphWorkflowListResponse:
             for item in store.list_graph_workflows()
         ]
     )
+
+
+@router.get("/workflows/summary", response_model=GraphWorkflowSummaryListResponse)
+def list_workflow_summaries(
+    limit: int = Query(default=60, ge=1, le=60),
+    offset: int = Query(default=0, ge=0),
+    q: Optional[str] = Query(default=None),
+) -> GraphWorkflowSummaryListResponse:
+    return GraphWorkflowSummaryListResponse(**store.list_graph_workflow_summaries(limit=limit, offset=offset, q=q))
 
 
 @router.post("/workflows", response_model=GraphWorkflowRecord)

@@ -408,6 +408,10 @@ function GraphStudioClient() {
     currentHistorySnapshot,
   );
   currentHistorySnapshotRef.current = currentHistorySnapshot;
+  const workflowSelectionKey = useMemo(
+    () => sidebarDialog === "workflows" ? `${activeTabId}:${graphWorkflowSnapshotSignature(currentWorkflowPayload)}` : "",
+    [activeTabId, currentWorkflowPayload, sidebarDialog],
+  );
   const activeTabIdRef = useRef(activeTabId);
   activeTabIdRef.current = activeTabId;
   const workspaceRestoreVersionRef = useRef(0);
@@ -419,8 +423,7 @@ function GraphStudioClient() {
     [],
   );
   const {
-    workflows,
-    refreshWorkflows,
+    workflowBrowser,
     saveWorkflow,
     saveWorkflowAs,
     openRenameWorkflow,
@@ -428,6 +431,7 @@ function GraphStudioClient() {
     closeWorkflow,
     deleteWorkflowRecord,
   } = useGraphWorkflowActions({
+    browserOpen: sidebarDialog === "workflows",
     workflowId,
     workflowName,
     renameDraft,
@@ -1204,8 +1208,10 @@ function GraphStudioClient() {
   );
 
   const loadWorkflowRecord = useCallback(
-    async (record: GraphWorkflowRecord) => {
+    async (record: GraphWorkflowRecord, selectionIsCurrent: () => boolean = () => true) => {
+      if (!selectionIsCurrent()) return;
       markWorkspaceChanged();
+      const loadVersion = workspaceRestoreVersionRef.current;
       const workflow = record.workflow_json;
       if (!workflow) {
         appendConsole(
@@ -1232,6 +1238,7 @@ function GraphStudioClient() {
           `Could not refresh graph node definitions before loading saved workflow: ${(error as Error).message}`,
         );
       }
+      if (!selectionIsCurrent() || !restoreVersionIsCurrent(loadVersion)) return;
       const savedCanvas = hydrateGraphWorkflowForCanvas({
         workflow: savedWorkflow,
         definitionsByType: hydrationDefinitions,
@@ -1298,6 +1305,7 @@ function GraphStudioClient() {
       edges,
       hydrateLatestRunForWorkflow,
       markWorkspaceChanged,
+      restoreVersionIsCurrent,
       nodeHandlers,
       nodes,
       openWorkflowTab,
@@ -1547,14 +1555,11 @@ function GraphStudioClient() {
   }, [appendConsole, reloadNodeDefinitions]);
 
   useEffect(() => {
-    refreshWorkflows({ startup: true }).catch((error) =>
-      appendConsole(`Failed to load workflows: ${error.message}`),
-    );
     refreshTemplates({ startup: true }).catch((error) =>
       appendConsole(`Failed to load templates: ${error.message}`),
     );
     void refreshCredits({ startup: true });
-  }, [appendConsole, refreshCredits, refreshTemplates, refreshWorkflows]);
+  }, [appendConsole, refreshCredits, refreshTemplates]);
 
   useEffect(() => {
     void refreshMediaLibrary();
@@ -2167,7 +2172,8 @@ function GraphStudioClient() {
           sidebarDialog={sidebarDialog}
           definitions={definitions}
           definitionsByCategory={definitionsByCategory}
-          workflows={workflows}
+          workflowBrowser={workflowBrowser}
+          workspaceKey={workflowSelectionKey}
           templates={templates}
           workflowId={workflowId}
           runHistory={runHistory}

@@ -206,7 +206,7 @@ export function useGraphTabs() {
       ? tabs.map((tab) => (tab.tab_id === activeTabId ? applyGraphTabSnapshot(tab, activeSnapshot) : tab))
       : tabs;
     const existing = snapshot.workflowId
-      ? tabsWithActiveSnapshot.find((tab) => tab.workflow_id === snapshot.workflowId)
+      ? tabsWithActiveSnapshot.find((tab) => tab.workflow_id === snapshot.workflowId && !tab.dirty)
       : null;
     const nextActiveTab = existing ? applyGraphTabSnapshot(existing, snapshot) : newTabFromSnapshot(snapshot);
     const result = graphTabOpenWorkflowTarget(tabs, activeTabId, nextActiveTab, activeSnapshot);

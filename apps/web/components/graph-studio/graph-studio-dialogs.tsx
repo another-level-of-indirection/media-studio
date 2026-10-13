@@ -9,7 +9,9 @@ import { GraphImageSelectorDialog } from "./graph-image-selector-dialog";
 import { GraphLibraryDialog, type GraphSidebarDialog } from "./graph-library-dialogs";
 import { GraphNodeContextMenu } from "./graph-node-context-menu";
 import { NODE_COLOR_CHOICES } from "./graph-studio-constants";
-import type { GraphArtifact, GraphGroup, GraphNodeDefinition, GraphRunHistoryItem, GraphTemplateRecord, GraphWorkflowRecord, StudioNode } from "./types";
+import type { GraphWorkflowBrowser } from "./hooks/use-graph-workflow-browser";
+import type { GraphWorkflowSelectionHandler } from "./hooks/use-graph-workflow-selection";
+import type { GraphArtifact, GraphGroup, GraphNodeDefinition, GraphRunHistoryItem, GraphTemplateRecord, GraphWorkflowSummary, StudioNode } from "./types";
 import type { GraphNodeColorChoice } from "./graph-node-context-menu";
 import type { GraphExecutionMode } from "./utils/graph-node-execution";
 import { graphMediaDragPayload } from "./utils/graph-media-preview";
@@ -21,7 +23,8 @@ export function GraphStudioDialogs({
   sidebarDialog,
   definitions,
   definitionsByCategory,
-  workflows,
+  workflowBrowser,
+  workspaceKey,
   templates,
   workflowId,
   runHistory,
@@ -69,7 +72,8 @@ export function GraphStudioDialogs({
   sidebarDialog: GraphSidebarDialog | null;
   definitions: GraphNodeDefinition[];
   definitionsByCategory: Record<string, GraphNodeDefinition[]>;
-  workflows: GraphWorkflowRecord[];
+  workflowBrowser: GraphWorkflowBrowser;
+  workspaceKey: string;
   templates: GraphTemplateRecord[];
   workflowId: string | null;
   runHistory: GraphRunHistoryItem[];
@@ -85,9 +89,9 @@ export function GraphStudioDialogs({
   imageLibraryMediaType?: MediaPickerMediaType;
   onCloseSidebar: () => void;
   onLoadStarterTemplate: () => void;
-  onLoadWorkflow: (workflow: GraphWorkflowRecord) => void;
+  onLoadWorkflow: GraphWorkflowSelectionHandler;
   onInstantiateTemplate: (template: GraphTemplateRecord) => void;
-  onDeleteWorkflow: (workflow: GraphWorkflowRecord) => void;
+  onDeleteWorkflow: (workflow: GraphWorkflowSummary) => void;
   onDeleteTemplate: (template: GraphTemplateRecord) => void;
   onImportWorkflow: () => void;
   onAddDefinitionNode: (definition: GraphNodeDefinition) => void;
@@ -161,7 +165,8 @@ export function GraphStudioDialogs({
         sidebarDialog={sidebarDialog === "images" ? null : sidebarDialog}
         definitions={definitions}
         definitionsByCategory={definitionsByCategory}
-        workflows={workflows}
+        workflowBrowser={workflowBrowser}
+        workspaceKey={workspaceKey}
         templates={templates}
         workflowId={workflowId}
         runHistory={runHistory}
