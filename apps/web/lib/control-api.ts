@@ -775,21 +775,21 @@ async function loadMediaDashboardSnapshot(options: MediaDashboardOptions | undef
   const projectParams = projectId ? `&project_id=${encodeURIComponent(projectId)}` : "";
   const presetsLimit = options?.presetsLimit ? Math.max(1, Math.min(100, Math.trunc(options.presetsLimit))) : null;
   const presetsEndpoint = studioOnly ? "/media/presets/summary" : presetsLimit ? `/media/presets/search?limit=${presetsLimit}&status=active` : "/media/presets";
-  const unused = Promise.resolve({ ok: true, data: null });
+  const skippedSectionResult = Promise.resolve({ ok: true, data: null });
   const [health, credits, pricing, externalUsageSummaryRaw, externalUsageRaw, modelsRaw, presetsRaw, promptRecipesRaw, promptsRaw, enhancementRaw, promptRecipeDraftingConfigRaw, mediaAssistantConfigRaw, queueSettingsRaw, queuePoliciesRaw, projectsRaw, batchesRaw, jobsRaw, assetsRaw, latestAssetRaw] =
     await Promise.all([
       fetchControlApiJson<ControlApiHealthData>("/health"),
       fetchControlApiJson<MediaCreditsResponse>("/media/credits"),
       fetchControlApiJson<ControlApiRawRecord>("/media/pricing"),
-      studioOnly ? unused : fetchControlApiJson<ControlApiRawRecord>("/media/external-llm-usage/summary"),
-      studioOnly ? unused : fetchControlApiJson<ControlApiRawRecord>("/media/external-llm-usage?limit=20"),
+      studioOnly ? skippedSectionResult : fetchControlApiJson<ControlApiRawRecord>("/media/external-llm-usage/summary"),
+      studioOnly ? skippedSectionResult : fetchControlApiJson<ControlApiRawRecord>("/media/external-llm-usage?limit=20"),
       fetchControlApiJson<ControlApiRawList>("/media/models"),
       fetchControlApiJson<ControlApiRawList | ControlApiRawRecord>(presetsEndpoint),
-      studioOnly ? unused : fetchControlApiJson<ControlApiRawList>("/prompt-recipes?status=all"),
+      studioOnly ? skippedSectionResult : fetchControlApiJson<ControlApiRawList>("/prompt-recipes?status=all"),
       fetchControlApiJson<ControlApiRawList>("/media/system-prompts"),
       fetchControlApiJson<ControlApiRawList>("/media/enhancement-configs"),
-      studioOnly ? unused : fetchControlApiJson<ControlApiRawRecord>("/media/prompt-recipe-drafting-config"),
-      studioOnly ? unused : fetchControlApiJson<ControlApiRawRecord>("/media/assistant-config"),
+      studioOnly ? skippedSectionResult : fetchControlApiJson<ControlApiRawRecord>("/media/prompt-recipe-drafting-config"),
+      studioOnly ? skippedSectionResult : fetchControlApiJson<ControlApiRawRecord>("/media/assistant-config"),
       fetchControlApiJson<ControlApiRawRecord>("/media/queue/settings"),
       fetchControlApiJson<ControlApiRawList>("/media/queue/policies"),
       fetchControlApiJson<ControlApiRawRecord>("/media/projects?status=all"),
