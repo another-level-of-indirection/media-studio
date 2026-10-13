@@ -102,7 +102,7 @@ def materialize_workflow_defaults(
     recipe_catalog_items: list[dict] | None = None,
     preset_catalog_items: list[dict] | None = None,
 ) -> GraphWorkflow:
-    definitions = definitions_by_type or registry.definitions_by_type()
+    definitions = definitions_by_type if definitions_by_type is not None else registry.definitions_by_type()
     all_recipe_catalog = recipe_catalog_items if recipe_catalog_items is not None else prompt_recipe_catalog(status="all")
     recipe_lookup = _recipe_by_id(all_recipe_catalog)
     all_preset_catalog = preset_catalog_items if preset_catalog_items is not None else media_preset_catalog(status="all")
