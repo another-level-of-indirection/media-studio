@@ -203,7 +203,6 @@ function GraphStudioClient() {
   const [nodes, setNodes, applyNodesChange] = useNodesState<StudioNode>([]);
   const {
     references,
-    setReferences,
     assets,
     availableCredits,
     creditsUnavailable,
@@ -1589,7 +1588,7 @@ function GraphStudioClient() {
     edges,
     definitions,
     references,
-    setReferences,
+    importImageFile,
     workflowFromCanvas,
     hydrateWorkflowPayload,
     setWorkflowMenuOpen,
