@@ -354,6 +354,9 @@ export function presetAcceptsImageInput(preset: MediaPreset | null | undefined) 
 }
 
 export function presetImageInputPolicy(preset: MediaPreset | null | undefined): StructuredImagePresetPolicy {
+  if (!preset?.input_slots_json && preset?.image_input_policy) {
+    return preset.image_input_policy;
+  }
   if (presetRequiresImageInput(preset)) {
     return "required";
   }

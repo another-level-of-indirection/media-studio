@@ -2,11 +2,12 @@
 
 type StudioGalleryLoadMoreProps = {
   loading: boolean;
+  retry?: boolean;
   galleryLoadMoreRef: React.MutableRefObject<HTMLDivElement | null>;
   onLoadMore: () => void;
 };
 
-export function StudioGalleryLoadMore({ loading, galleryLoadMoreRef, onLoadMore }: StudioGalleryLoadMoreProps) {
+export function StudioGalleryLoadMore({ loading, retry = false, galleryLoadMoreRef, onLoadMore }: StudioGalleryLoadMoreProps) {
   return (
     <div
       ref={galleryLoadMoreRef}
@@ -20,7 +21,7 @@ export function StudioGalleryLoadMore({ loading, galleryLoadMoreRef, onLoadMore 
           onClick={onLoadMore}
           className="studio-icon-button studio-gallery-load-more-button"
         >
-          Scroll or tap to load more
+          {retry ? "Retry loading gallery" : "Scroll or tap to load more"}
         </button>
       )}
     </div>

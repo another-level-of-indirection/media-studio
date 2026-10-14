@@ -22,6 +22,29 @@ def list_graph_workflows() -> List[Dict[str, Any]]:
     return [_decode_row(row) for row in rows]
 
 
+def list_graph_workflow_summaries(*, limit: int = 60, offset: int = 0, q: Optional[str] = None) -> Dict[str, Any]:
+    limit = max(1, min(int(limit), 60))
+    offset = max(0, int(offset))
+    where = "status != 'archived'"
+    params: List[Any] = []
+    search = (q or "").strip().lower()
+    if search:
+        pattern = "%" + search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        where += " AND (LOWER(name) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(description, '')) LIKE ? ESCAPE '\\')"
+        params.extend([pattern, pattern])
+    with get_connection() as connection:
+        total = int(connection.execute(f"SELECT COUNT(*) AS count FROM graph_workflows WHERE {where}", params).fetchone()["count"])
+        rows = connection.execute(
+            f"SELECT workflow_id, name, description, status, schema_version, created_at, updated_at "
+            f"FROM graph_workflows WHERE {where} "
+            "ORDER BY updated_at DESC, name ASC, workflow_id ASC LIMIT ? OFFSET ?",
+            [*params, limit, offset],
+        ).fetchall()
+    items = [dict(row) for row in rows]
+    next_offset = offset + len(items) if items and offset + len(items) < total else None
+    return {"items": items, "total": total, "limit": limit, "offset": offset, "next_offset": next_offset}
+
+
 def get_graph_workflow(workflow_id: str) -> Optional[Dict[str, Any]]:
     return _get_table("graph_workflows", "workflow_id", workflow_id)
 

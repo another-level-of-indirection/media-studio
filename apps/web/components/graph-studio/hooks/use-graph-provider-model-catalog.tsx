@@ -9,6 +9,7 @@ import type { SharedProviderCatalogState } from "@/lib/llm-provider-models";
 import type { ControlApiHealthData } from "@/lib/types";
 
 import type { StudioNode } from "../types";
+import { readGraphStartup } from "../utils/graph-startup-reads";
 
 const GRAPH_PROVIDER_CATALOG_TTL_MS = 5 * 60 * 1000;
 const GRAPH_PROVIDER_READINESS_TTL_MS = 60 * 1000;
@@ -130,11 +131,7 @@ function hasGraphPromptNodes(nodes: StudioNode[]) {
 }
 
 async function fetchGraphProviderReadiness() {
-  const response = await fetch("/api/control/health", { cache: "no-store" });
-  if (!response.ok) {
-    throw new Error(`Health check returned ${response.status}.`);
-  }
-  const health = (await response.json()) as ControlApiHealthData;
+  const health = await readGraphStartup<ControlApiHealthData>("/api/control/health");
   const readiness = providerReadinessFromHealth(health);
   return {
     openrouter: {

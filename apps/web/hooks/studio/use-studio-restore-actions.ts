@@ -14,7 +14,9 @@ import {
   buildStudioJobPrimaryInput,
   buildStudioJobReferenceInputs,
   buildStudioRetryRestorePlan,
+  resolveStudioRetryPreset,
 } from "@/lib/media-studio-helpers";
+import { fetchStudioPresetDetail, mergeStudioPresetDetail } from "@/hooks/studio/use-studio-shell-catalog";
 import type {
   MediaAsset,
   MediaBatch,
@@ -87,6 +89,25 @@ async function fetchJobStateById(jobId: string | number) {
   };
 }
 
+
+async function hydrateRestorePresets(
+  job: MediaJob | null,
+  presets: MediaPreset[],
+  onError: RestoreComposerDependencies["setFormMessage"],
+) {
+  try {
+    const presetKey = job?.resolved_preset_key || job?.requested_preset_key;
+    if (!presetKey) return presets;
+    const preset = resolveStudioRetryPreset(job, presets);
+    if (preset?.input_schema_json) return presets;
+    const detail = await fetchStudioPresetDetail(preset?.preset_id ?? presetKey);
+    return mergeStudioPresetDetail(presets, detail);
+  } catch (error) {
+    onError({ tone: "danger", text: error instanceof Error ? error.message : "Unable to load preset details." });
+    return null;
+  }
+}
+
 export function useStudioRestoreActions({
   selectedFailedJobRetryPlan,
   selectedFailedJobPrimaryInput,
@@ -137,8 +158,11 @@ export function useStudioRestoreActions({
       if (!job) {
         return;
       }
+      const restoredPresets = await hydrateRestorePresets(job, presets, restoreDependencies.setFormMessage);
+      if (!restoredPresets) return;
+      const retryPlan = buildStudioRetryRestorePlan({ job, models, presets: restoredPresets, localAssets, favoriteAssets }) ?? selectedFailedJobRetryPlan;
       await restoreComposerFromPlan({
-        plan: selectedFailedJobRetryPlan,
+        plan: retryPlan,
         fallbackPrimaryInput: selectedFailedJobPrimaryInput,
         fallbackReferenceInputs: selectedFailedJobReferenceInputs,
         sourceAssetId: job.source_asset_id ?? null,
@@ -155,6 +179,7 @@ export function useStudioRestoreActions({
       selectedFailedJobPrimaryInput,
       selectedFailedJobReferenceInputs,
       selectedFailedJobRetryPlan,
+      presets, models, localAssets, favoriteAssets, restoreDependencies,
     ],
   );
 
@@ -183,12 +208,14 @@ export function useStudioRestoreActions({
         }
       }
 
+      const restoredPresets = await hydrateRestorePresets(revisionJob, presets, restoreDependencies.setFormMessage);
+      if (!restoredPresets) return;
       const revisionPlan =
         buildStudioRetryRestorePlan({
           job: revisionJob,
           batch: revisionBatch,
           models,
-          presets,
+          presets: restoredPresets,
           localAssets,
           favoriteAssets,
         }) ?? selectedAssetRevisionPlan;
@@ -227,6 +254,7 @@ export function useStudioRestoreActions({
       selectedAssetRevisionPlan,
       setLocalJobs,
       upsertBatch,
+      restoreDependencies,
     ],
   );
 

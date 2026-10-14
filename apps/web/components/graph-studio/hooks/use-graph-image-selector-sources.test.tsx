@@ -14,6 +14,7 @@ function jsonResponse(payload: unknown) {
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -331,4 +332,91 @@ describe("useGraphImageSelectorSources", () => {
       ),
     ).toBe(false);
   });
+});
+
+describe("Graph first-page reuse", () => {
+  function setup() {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), "http://local");
+      const offset = Number(url.searchParams.get("offset"));
+      const tag = `${url.searchParams.get("project_id")}-${url.searchParams.get("q")}`;
+      return jsonResponse(url.pathname.endsWith("media-assets") ? {
+        ok: true, assets: Array.from({ length: 40 }, (_, i) => ({ asset_id: `${tag}-${offset + i}`, generation_kind: "image", hero_thumb_path: "thumb.webp", hero_thumb_url: "/thumb.webp", hero_original_url: "/original.png" })), next_offset: offset + 40,
+      } : { ok: true, items: [{ reference_id: tag, kind: "image", thumb_url: "/ref-thumb.webp", stored_url: "/ref-original.png" }], next_offset: null });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  it("reuses first pages for 30 seconds, resets to page one after paging, and refreshes explicitly", async () => {
+    const fetchMock = setup();
+    const now = vi.spyOn(Date, "now").mockReturnValue(1000);
+    const { result } = renderHook(() => useGraphImageSelectorSources());
+    await act(async () => { await result.current.loadSource("generated"); await result.current.loadSource("imported"); });
+    await act(async () => { await result.current.loadSource("generated", { append: true }); });
+    await act(async () => { await result.current.loadSource("generated", { append: true }); });
+    expect(result.current.generated.items).toHaveLength(80);
+    expect(result.current.generated.items[0]?.id).toContain("40");
+    await act(async () => { await result.current.loadSource("generated"); await result.current.loadSource("imported"); });
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(result.current.generated.items).toHaveLength(40);
+    expect(result.current.generated.nextOffset).toBe(40);
+    expect(result.current.generated.items[0]).toMatchObject({ previewUrl: "/api/control/files/thumb.webp", fullUrl: "/original.png" });
+    now.mockReturnValue(31_001);
+    await act(async () => { await result.current.loadSource("generated"); });
+    await act(async () => { await result.current.loadSource("generated", { force: true }); });
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+    now.mockRestore();
+  });
+
+  it("isolates source, query and project and invalidates both pages on mocked new-media revision", async () => {
+    const fetchMock = setup();
+    const { result, rerender } = renderHook(({ revision }) => useGraphImageSelectorSources("image", revision), { initialProps: { revision: 0 } });
+    await act(async () => { await result.current.loadSource("generated"); await result.current.loadSource("imported"); });
+    await act(async () => { result.current.setProjectId("private"); await result.current.loadSource("generated", { projectId: "private", query: "old" }); });
+    expect(result.current.generated.items[0]?.id).toBe("private-old-0");
+    await act(async () => { await result.current.loadSource("generated", { projectId: null, query: "" }); });
+    expect(result.current.generated.items[0]?.id).toBe("null-null-0");
+    rerender({ revision: 1 });
+    await act(async () => { await result.current.loadSource("generated", { projectId: null, query: "" }); await result.current.loadSource("imported", { projectId: null, query: "" }); });
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+  });
+
+  it("does not reuse failed refreshes and retries the page", async () => {
+    const fetchMock = setup();
+    const { result } = renderHook(() => useGraphImageSelectorSources());
+    await act(async () => { await result.current.loadSource("generated"); });
+    fetchMock.mockRejectedValueOnce(new Error("offline"));
+    await act(async () => { await result.current.loadSource("generated", { force: true }); });
+    expect(result.current.generated.error).toBe("offline");
+    await act(async () => { await result.current.loadSource("generated", { force: true }); });
+    expect(result.current.generated.error).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+});
+
+it("ignores a delayed page after project or media scope changes and deduplicates overlapping first-page reads", async () => {
+  let resolve!: (value: ReturnType<typeof jsonResponse>) => void;
+  const fetchMock = vi.fn(() => new Promise<ReturnType<typeof jsonResponse>>((done) => { resolve = done; }));
+  vi.stubGlobal("fetch", fetchMock);
+  const { result, rerender } = renderHook(({ type }) => useGraphImageSelectorSources(type), { initialProps: { type: "image" as "image" | "video" } });
+  let pending!: Promise<void>;
+  await act(async () => {
+    pending = result.current.loadSource("generated");
+    await result.current.loadSource("generated");
+  });
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  act(() => result.current.setProjectId("private"));
+  await act(async () => {
+    resolve(jsonResponse({ assets: [{ asset_id: "global", hero_thumb_url: "/global.webp", generation_kind: "image" }] }));
+    await pending;
+  });
+  expect(result.current.generated.items).toEqual([]);
+  await act(async () => { pending = result.current.loadSource("generated"); });
+  rerender({ type: "video" });
+  await act(async () => {
+    resolve(jsonResponse({ assets: [{ asset_id: "private-image", hero_thumb_url: "/private.webp", generation_kind: "image" }] }));
+    await pending;
+  });
+  expect(result.current.generated.items).toEqual([]);
 });

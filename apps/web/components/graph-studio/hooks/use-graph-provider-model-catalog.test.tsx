@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { __resetSharedProviderModelCatalogCacheForTests } from "@/hooks/use-shared-provider-model-catalog";
 
 import { __resetGraphProviderReadinessCacheForTests, useGraphProviderModelCatalog } from "./use-graph-provider-model-catalog";
+import { __resetGraphStartupReadsForTests } from "../utils/graph-startup-reads";
 
 vi.mock("@/lib/media-model-admin", () => ({
   probeSharedProviderCatalogRequest: vi.fn(),
@@ -40,6 +41,7 @@ function Harness() {
 
 afterEach(() => {
   cleanup();
+  __resetGraphStartupReadsForTests();
   __resetSharedProviderModelCatalogCacheForTests();
   __resetGraphProviderReadinessCacheForTests();
   vi.unstubAllGlobals();

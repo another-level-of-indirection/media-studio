@@ -10,7 +10,7 @@ The main preset flow is:
 
 1. An admin creates or edits a preset in `/presets`.
 2. The preset is stored in the API database.
-3. Studio loads active presets and filters them to compatible models.
+3. Studio loads compact non-archived preset summaries and filters visible choices to compatible models. Full details load when a preset is selected, a saved composer is restored, or a preset-backed asset is inspected/revised/retried.
 4. A user selects a preset in the gallery/composer UI.
 5. Studio renders structured text fields and image slots.
 6. The backend validates the selected preset, resolves placeholder values, resolves image references, and submits the final generation request.
@@ -179,6 +179,12 @@ Important stored fields:
 - `priority`: ordering weight.
 
 ## API Routes
+
+Studio startup uses `GET /media/presets/summary` for the complete non-archived catalog. Summaries retain identity, labels, thumbnails, model scope, text/image input counts and the image-input policy (`none`, `optional`, `required`); they omit prompt templates, field/slot schemas, defaults, rules and notes. `GET /media/presets/search/summary` uses the existing search/category/status filters and `limit`/`offset` pagination for the preset browser. Existing full preset list/search/detail responses remain available with their previous defaults.
+
+Studio uses its own dashboard loader, retaining health, credits, pricing, model, enhancement, queue, project and gallery data while omitting unrelated usage/recipe/assistant configuration reads. General Settings uses a focused loader for models, queue settings and queue policies; Jobs continues to use the shared loader. Preset detail hydration suspends draft persistence and preset-dependent resets until the exact schema arrives; saved user values take precedence over field/model defaults. Explicit model and new preset selections still initialize their defaults. Failed restore hydration leaves the composer draft intact.
+
+Studio gallery pages use opaque `next_cursor` continuations from `/api/control/media-assets`. The initial server snapshot seeds the first continuation; the gallery request owner includes it and the query scope in shared page requests. A first-page request opts in with `pagination=cursor`; a continuation uses `cursor` and makes one page-sized backend read. Cursors bind the project, media kind, model, favorites, status, preset, search and response view. Scope changes start at the first page. Malformed or mismatched web continuations return HTTP 400 with a reload instruction; backend failures, including an unavailable asset anchor, retain the proxy’s existing HTTP 502 behavior and error text. Offset-only requests remain available for other consumers. The backend opt-in `cursor_mode=asset_id` resolves the last asset and continues by timestamp and SQLite rowid, retaining the existing order within timestamp ties. Legacy timestamp cursors remain unchanged. A removed anchor produces an explicit reload error.
 
 Backend FastAPI routes:
 

@@ -75,6 +75,7 @@ import {
   useGraphRunLifecycle,
   type GraphValidationError,
 } from "./hooks/use-graph-run-lifecycle";
+import { useGraphWorkflowRunPreview } from "./hooks/use-graph-workflow-run-preview";
 import { useGraphWorkflowActions } from "./hooks/use-graph-workflow-actions";
 import { useGraphWorkflowMenuState } from "./hooks/use-graph-workflow-menu-state";
 import { useGraphToolbarWorkflowActions } from "./hooks/use-graph-toolbar-workflow-actions";
@@ -135,7 +136,6 @@ import {
   blankGraphWorkflowPayload,
   graphWorkflowDirtyState,
   graphWorkflowSnapshotSignature,
-  graphWorkflowSnapshotsMatch,
   shouldReloadSavedWorkflowRecordOnRestore,
 } from "./utils/graph-tabs";
 import { hydrateGraphWorkflowForCanvas } from "./utils/graph-workflow-hydration";
@@ -200,20 +200,19 @@ function GraphStudioClient() {
   const [workflowUpdatedAt, setWorkflowUpdatedAt] = useState<string | null>(
     null,
   );
+  const [nodes, setNodes, applyNodesChange] = useNodesState<StudioNode>([]);
   const {
     references,
-    setReferences,
     assets,
     availableCredits,
     creditsUnavailable,
     refreshCredits,
-    refreshImageAssets,
+    invalidateMediaLibrary,
     refreshAssetsByIds,
     refreshReferencesByIds,
-    refreshReferenceMedia,
-    refreshMediaLibrary,
+    mediaRevision,
     importImageFile,
-  } = useGraphMediaLibrary();
+  } = useGraphMediaLibrary(nodes);
   const [previewOverlay, setPreviewOverlay] = useState<{
     previews: GraphMediaPreview[];
     index: number;
@@ -299,7 +298,6 @@ function GraphStudioClient() {
     },
     [closeContextMenus, closeWorkflowMenu, openNodeSearch],
   );
-  const [nodes, setNodes, applyNodesChange] = useNodesState<StudioNode>([]);
   const nodesRef = useRef<StudioNode[]>([]);
   const manualNodeMoveRef = useRef(false);
   const { beginAssistantLayout, stopAssistantLayout } = useAssistantLayout({ nodes, setNodes, activeTabId });
@@ -408,6 +406,10 @@ function GraphStudioClient() {
     currentHistorySnapshot,
   );
   currentHistorySnapshotRef.current = currentHistorySnapshot;
+  const workflowSelectionKey = useMemo(
+    () => sidebarDialog === "workflows" ? `${activeTabId}:${graphWorkflowSnapshotSignature(currentWorkflowPayload)}` : "",
+    [activeTabId, currentWorkflowPayload, sidebarDialog],
+  );
   const activeTabIdRef = useRef(activeTabId);
   activeTabIdRef.current = activeTabId;
   const workspaceRestoreVersionRef = useRef(0);
@@ -419,8 +421,7 @@ function GraphStudioClient() {
     [],
   );
   const {
-    workflows,
-    refreshWorkflows,
+    workflowBrowser,
     saveWorkflow,
     saveWorkflowAs,
     openRenameWorkflow,
@@ -428,6 +429,7 @@ function GraphStudioClient() {
     closeWorkflow,
     deleteWorkflowRecord,
   } = useGraphWorkflowActions({
+    browserOpen: sidebarDialog === "workflows",
     workflowId,
     workflowName,
     renameDraft,
@@ -1135,77 +1137,17 @@ function GraphStudioClient() {
     nodeHandlers, setNodes, setEdges, setGroups, activeTabIdRef, workspaceRestoreVersionRef, currentHistorySnapshotRef,
   });
 
-  const hydrateLastRun = useCallback(
-    async (runId: string, preloadedRun?: GraphRun) => {
-      try {
-        const current =
-          preloadedRun ??
-          (await jsonFetch<GraphRun>(`/api/control/media/graph/runs/${runId}`));
-        setRun(current);
-        applyRunNodesToCanvas(current);
-        await refreshImageAssets().catch(() => undefined);
-        await refreshAssetsByIds(assetIdsFromGraphRun(current)).catch(
-          () => undefined,
-        );
-        await refreshReferenceMedia().catch(() => undefined);
-        const events = await jsonFetch<{ items: GraphRunEvent[] }>(
-          `/api/control/media/graph/runs/${runId}/events`,
-        );
-        if (events.items.length) {
-          applyRunEventsToCanvas(events.items, current);
-          setConsoleLines(formatGraphRunEventsForConsole(events.items, nodes));
-        }
-      } catch (error) {
-        appendConsole(
-          `Last run could not be restored: ${(error as Error).message}`,
-        );
-      }
-    },
-    [
-      appendConsole,
-      applyRunEventsToCanvas,
-      applyRunNodesToCanvas,
-      nodes,
-      refreshAssetsByIds,
-      refreshImageAssets,
-      refreshReferenceMedia,
-    ],
-  );
-
-  const hydrateLatestRunForWorkflow = useCallback(
-    async (
-      targetWorkflowId: string,
-      currentWorkflow?: GraphWorkflowPayload | null,
-    ) => {
-      const payload = await jsonFetch<{ items?: GraphRunHistoryItem[] }>(
-        "/api/control/media/graph/runs/summary?limit=15",
-      );
-      const latestRunSummary = payload.items?.find(
-        (item) => item.workflow_id === targetWorkflowId,
-      );
-      if (latestRunSummary?.run_id) {
-        const latestRun = await jsonFetch<GraphRun>(
-          `/api/control/media/graph/runs/${latestRunSummary.run_id}`,
-        );
-        if (
-          currentWorkflow &&
-          latestRun.workflow_json &&
-          !graphWorkflowSnapshotsMatch(currentWorkflow, latestRun.workflow_json)
-        ) {
-          appendConsole(
-            `Skipped last-run restore for ${currentWorkflow.name} because the latest run came from a different workflow state.`,
-          );
-          return;
-        }
-        await hydrateLastRun(latestRunSummary.run_id, latestRun);
-      }
-    },
-    [appendConsole, hydrateLastRun],
-  );
+  const { hydrateLastRun, hydrateLatestRunForWorkflow } = useGraphWorkflowRunPreview({
+    appendConsole, applyRunEventsToCanvas, applyRunNodesToCanvas, nodes,
+    refreshAssetsByIds, setRun, setConsoleLines,
+    workspaceRestoreVersionRef,
+  });
 
   const loadWorkflowRecord = useCallback(
-    async (record: GraphWorkflowRecord) => {
+    async (record: GraphWorkflowRecord, selectionIsCurrent: () => boolean = () => true) => {
+      if (!selectionIsCurrent()) return;
       markWorkspaceChanged();
+      const loadVersion = workspaceRestoreVersionRef.current;
       const workflow = record.workflow_json;
       if (!workflow) {
         appendConsole(
@@ -1232,6 +1174,7 @@ function GraphStudioClient() {
           `Could not refresh graph node definitions before loading saved workflow: ${(error as Error).message}`,
         );
       }
+      if (!selectionIsCurrent() || !restoreVersionIsCurrent(loadVersion)) return;
       const savedCanvas = hydrateGraphWorkflowForCanvas({
         workflow: savedWorkflow,
         definitionsByType: hydrationDefinitions,
@@ -1282,8 +1225,9 @@ function GraphStudioClient() {
       canvasHydrated.current = true;
       setSidebarDialog(null);
       appendConsole(`Loaded workflow ${nextWorkflowName}.`);
-      void hydrateLatestRunForWorkflow(record.workflow_id, savedWorkflow).catch(
+      void hydrateLatestRunForWorkflow(record.workflow_id, savedWorkflow, loadVersion).catch(
         (error) => {
+          if (!restoreVersionIsCurrent(loadVersion)) return;
           appendConsole(
             `Latest run preview could not be restored: ${(error as Error).message}`,
           );
@@ -1298,6 +1242,7 @@ function GraphStudioClient() {
       edges,
       hydrateLatestRunForWorkflow,
       markWorkspaceChanged,
+      restoreVersionIsCurrent,
       nodeHandlers,
       nodes,
       openWorkflowTab,
@@ -1454,7 +1399,6 @@ function GraphStudioClient() {
       setGroups(restored.groups);
       canvasHydrated.current = true;
       setHistoryReady(true);
-      await refreshImageAssets().catch(() => undefined);
       await refreshAssetsByIds(assetIdsFromGraphRun(latestRun)).catch(
         () => undefined,
       );
@@ -1477,7 +1421,6 @@ function GraphStudioClient() {
       applyRunEventsToCanvas,
       nodeHandlers,
       refreshAssetsByIds,
-      refreshImageAssets,
       restoreVersionIsCurrent,
       setEdges,
       setNodes,
@@ -1547,18 +1490,11 @@ function GraphStudioClient() {
   }, [appendConsole, reloadNodeDefinitions]);
 
   useEffect(() => {
-    refreshWorkflows().catch((error) =>
-      appendConsole(`Failed to load workflows: ${error.message}`),
-    );
-    refreshTemplates().catch((error) =>
+    refreshTemplates({ startup: true }).catch((error) =>
       appendConsole(`Failed to load templates: ${error.message}`),
     );
-    void refreshCredits();
-  }, [appendConsole, refreshCredits, refreshTemplates, refreshWorkflows]);
-
-  useEffect(() => {
-    void refreshMediaLibrary();
-  }, [refreshMediaLibrary]);
+    void refreshCredits({ startup: true });
+  }, [appendConsole, refreshCredits, refreshTemplates]);
 
   useEffect(() => {
     if (sidebarDialog !== "runs") return;
@@ -1652,7 +1588,7 @@ function GraphStudioClient() {
     edges,
     definitions,
     references,
-    setReferences,
+    importImageFile,
     workflowFromCanvas,
     hydrateWorkflowPayload,
     setWorkflowMenuOpen,
@@ -1708,9 +1644,8 @@ function GraphStudioClient() {
     applyRunNodesToCanvas,
     applyRunEventsToCanvas,
     refreshCredits,
-    refreshImageAssets,
+    invalidateMediaLibrary,
     refreshAssetsByIds,
-    refreshReferenceMedia,
     setConsoleLines,
     appendConsole,
     confirmPricingForRun,
@@ -2164,10 +2099,12 @@ function GraphStudioClient() {
         />
         <GraphStudioFixtureLayer kind={graphFixture} />
         <GraphStudioDialogs
+          mediaRevision={mediaRevision}
           sidebarDialog={sidebarDialog}
           definitions={definitions}
           definitionsByCategory={definitionsByCategory}
-          workflows={workflows}
+          workflowBrowser={workflowBrowser}
+          workspaceKey={workflowSelectionKey}
           templates={templates}
           workflowId={workflowId}
           runHistory={runHistory}

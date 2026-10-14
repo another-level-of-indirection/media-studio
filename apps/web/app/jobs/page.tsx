@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Clapperboard, Coins, LoaderCircle, SlidersHorizontal } from "lucide-react";
 
 import { JobsBatchCard } from "@/app/jobs/jobs-batch-card";
+import { toJobsBatchCardView } from "@/app/jobs/jobs-batch-card-view";
 import { MediaBatchActions } from "@/app/jobs/media-batch-actions";
 import { RuntimeControls } from "@/app/jobs/runtime-controls";
 import {
@@ -231,7 +232,7 @@ export default async function JobsPage({
                 const relatedAssets = assets.filter((asset) =>
                   (batch.jobs ?? []).some((job) => job.job_id === asset.job_id),
                 );
-                return <JobsBatchCard key={batch.batch_id} batch={batch} assets={relatedAssets} />;
+                return <JobsBatchCard key={batch.batch_id} batch={toJobsBatchCardView(batch)} assets={relatedAssets} />;
               })
             ) : (
               <EmptyState

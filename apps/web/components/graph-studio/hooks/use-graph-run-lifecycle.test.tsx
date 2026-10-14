@@ -82,9 +82,8 @@ function makeRunStatus(overrides: Partial<GraphRunStatusSnapshot> = {}): GraphRu
 
 type HarnessProps = {
   refreshCredits: () => Promise<void>;
-  refreshImageAssets: () => Promise<void>;
+  invalidateMediaLibrary: () => void;
   refreshAssetsByIds: (assetIds: string[]) => Promise<void>;
-  refreshReferenceMedia: () => Promise<void>;
   appendConsole?: ReturnType<typeof vi.fn>;
   applyValidationErrorsToNodes?: ReturnType<typeof vi.fn>;
   assistantContextSessionId?: string | null;
@@ -119,9 +118,8 @@ function Harness(props: HarnessProps) {
     applyRunNodesToCanvas: vi.fn(),
     applyRunEventsToCanvas: vi.fn(),
     refreshCredits: props.refreshCredits,
-    refreshImageAssets: props.refreshImageAssets,
+    invalidateMediaLibrary: props.invalidateMediaLibrary,
     refreshAssetsByIds: props.refreshAssetsByIds,
-    refreshReferenceMedia: props.refreshReferenceMedia,
     setConsoleLines: vi.fn(),
     appendConsole,
     assistantContextSessionId: props.assistantContextSessionId,
@@ -167,9 +165,8 @@ describe("useGraphRunLifecycle", () => {
     render(
       <Harness
         refreshCredits={vi.fn().mockResolvedValue(undefined)}
-        refreshImageAssets={vi.fn().mockResolvedValue(undefined)}
+        invalidateMediaLibrary={vi.fn().mockResolvedValue(undefined)}
         refreshAssetsByIds={vi.fn().mockResolvedValue(undefined)}
-        refreshReferenceMedia={vi.fn().mockResolvedValue(undefined)}
       />,
     );
 
@@ -185,9 +182,8 @@ describe("useGraphRunLifecycle", () => {
 
   it("deduplicates output refresh work while repeated run refreshes return the same assets", async () => {
     const refreshCredits = vi.fn().mockResolvedValue(undefined);
-    const refreshImageAssets = vi.fn().mockResolvedValue(undefined);
+    const invalidateMediaLibrary = vi.fn().mockResolvedValue(undefined);
     const refreshAssetsByIds = vi.fn().mockResolvedValue(undefined);
-    const refreshReferenceMedia = vi.fn().mockResolvedValue(undefined);
     const fetchMock = vi.mocked(jsonFetch);
     fetchMock.mockImplementation(async (url: string) => {
       if (url.endsWith("/status")) {
@@ -213,17 +209,15 @@ describe("useGraphRunLifecycle", () => {
     render(
       <Harness
         refreshCredits={refreshCredits}
-        refreshImageAssets={refreshImageAssets}
+        invalidateMediaLibrary={invalidateMediaLibrary}
         refreshAssetsByIds={refreshAssetsByIds}
-        refreshReferenceMedia={refreshReferenceMedia}
       />,
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Refresh run" }));
     fireEvent.click(screen.getByRole("button", { name: "Refresh run" }));
 
-    await waitFor(() => expect(refreshReferenceMedia).toHaveBeenCalledTimes(1));
-    expect(refreshImageAssets).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(invalidateMediaLibrary).toHaveBeenCalledTimes(1));
     expect(refreshAssetsByIds).toHaveBeenCalledTimes(1);
     expect(refreshAssetsByIds).toHaveBeenCalledWith(["asset-1"]);
     expect(refreshCredits).not.toHaveBeenCalled();
@@ -247,9 +241,8 @@ describe("useGraphRunLifecycle", () => {
     render(
       <Harness
         refreshCredits={vi.fn().mockResolvedValue(undefined)}
-        refreshImageAssets={vi.fn().mockResolvedValue(undefined)}
+        invalidateMediaLibrary={vi.fn().mockResolvedValue(undefined)}
         refreshAssetsByIds={vi.fn().mockResolvedValue(undefined)}
-        refreshReferenceMedia={vi.fn().mockResolvedValue(undefined)}
       />,
     );
 
@@ -285,9 +278,8 @@ describe("useGraphRunLifecycle", () => {
     render(
       <Harness
         refreshCredits={vi.fn().mockResolvedValue(undefined)}
-        refreshImageAssets={vi.fn().mockResolvedValue(undefined)}
+        invalidateMediaLibrary={vi.fn().mockResolvedValue(undefined)}
         refreshAssetsByIds={vi.fn().mockResolvedValue(undefined)}
-        refreshReferenceMedia={vi.fn().mockResolvedValue(undefined)}
         appendConsole={appendConsole}
         applyValidationErrorsToNodes={applyValidationErrorsToNodes}
       />,
@@ -324,9 +316,8 @@ describe("useGraphRunLifecycle", () => {
       <Harness
         assistantContextSessionId="session-toolbar"
         refreshCredits={vi.fn().mockResolvedValue(undefined)}
-        refreshImageAssets={vi.fn().mockResolvedValue(undefined)}
+        invalidateMediaLibrary={vi.fn().mockResolvedValue(undefined)}
         refreshAssetsByIds={vi.fn().mockResolvedValue(undefined)}
-        refreshReferenceMedia={vi.fn().mockResolvedValue(undefined)}
       />,
     );
 
@@ -349,9 +340,8 @@ describe("useGraphRunLifecycle", () => {
       <Harness
         assistantContextSessionId="session-toolbar"
         refreshCredits={vi.fn().mockResolvedValue(undefined)}
-        refreshImageAssets={vi.fn().mockResolvedValue(undefined)}
+        invalidateMediaLibrary={vi.fn().mockResolvedValue(undefined)}
         refreshAssetsByIds={vi.fn().mockResolvedValue(undefined)}
-        refreshReferenceMedia={vi.fn().mockResolvedValue(undefined)}
       />,
     );
 
@@ -376,9 +366,8 @@ describe("useGraphRunLifecycle", () => {
     render(
       <Harness
         refreshCredits={vi.fn().mockResolvedValue(undefined)}
-        refreshImageAssets={vi.fn().mockResolvedValue(undefined)}
+        invalidateMediaLibrary={vi.fn().mockResolvedValue(undefined)}
         refreshAssetsByIds={vi.fn().mockResolvedValue(undefined)}
-        refreshReferenceMedia={vi.fn().mockResolvedValue(undefined)}
       />,
     );
 
@@ -405,8 +394,8 @@ it("surfaces an unknown submission outcome when the run response is lost", async
     if (String(url).endsWith("/runs")) throw new TypeError("Failed to fetch");
     return makeRunStatus() as never;
   });
-  render(<Harness refreshCredits={vi.fn()} refreshImageAssets={vi.fn()}
-    refreshAssetsByIds={vi.fn()} refreshReferenceMedia={vi.fn()} />);
+  render(<Harness refreshCredits={vi.fn()} invalidateMediaLibrary={vi.fn()}
+    refreshAssetsByIds={vi.fn()} />);
   fireEvent.click(screen.getByRole("button", { name: "Run confirmed workflow" }));
   await waitFor(() => expect(screen.getByTestId("launch-error").textContent).toMatch(/run outcome is unknown/i));
 });

@@ -13,6 +13,7 @@ type StudioGalleryProps = {
   galleryTiles: GalleryTile[];
   activeGalleryHasMore: boolean;
   activeGalleryLoadingMore: boolean;
+  firstGalleryPageFailed?: boolean;
   selectedAssetId: string | number | null;
   favoriteAssetIdBusy: string | number | null;
   galleryLoadMoreRef: React.MutableRefObject<HTMLDivElement | null>;
@@ -29,6 +30,7 @@ export function StudioGallery({
   galleryTiles,
   activeGalleryHasMore,
   activeGalleryLoadingMore,
+  firstGalleryPageFailed = false,
   selectedAssetId,
   favoriteAssetIdBusy,
   galleryLoadMoreRef,
@@ -38,7 +40,7 @@ export function StudioGallery({
   onDragAsset,
   onToggleFavorite,
 }: StudioGalleryProps) {
-  if (galleryTiles.length === 0) {
+  if (galleryTiles.length === 0 && !firstGalleryPageFailed && !activeGalleryLoadingMore) {
     return <StudioGalleryEmptyState apiHealthy={apiHealthy} immersive={immersive} />;
   }
 
@@ -71,9 +73,10 @@ export function StudioGallery({
           />
         );
       })}
-      {activeGalleryHasMore || activeGalleryLoadingMore ? (
+      {activeGalleryHasMore || activeGalleryLoadingMore || firstGalleryPageFailed ? (
         <StudioGalleryLoadMore
           loading={activeGalleryLoadingMore}
+          retry={firstGalleryPageFailed}
           galleryLoadMoreRef={galleryLoadMoreRef}
           onLoadMore={onLoadMore}
         />

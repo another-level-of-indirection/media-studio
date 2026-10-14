@@ -15,12 +15,10 @@ type StudioGalleryPageEffectsOptions = {
   assetFeedHasMore: boolean;
   assetFeedNextOffset: number | null;
   loadingMoreAssets: boolean;
-  prefetchingAssetPage: boolean;
   prefetchedAssetPage: AssetPagePayload | null;
   favoriteAssetFeedHasMore: boolean;
   favoriteAssetFeedNextOffset: number | null;
   loadingMoreFavoriteAssets: boolean;
-  prefetchingFavoriteAssetPage: boolean;
   prefetchedFavoriteAssetPage: AssetPagePayload | null;
   favoritesOnly: boolean;
   galleryKindFilter: GalleryKindFilter;
@@ -47,6 +45,7 @@ type StudioGalleryPageEffectsOptions = {
   setPrefetchedFavoriteAssetPage: (value: AssetPagePayload | null) => void;
   setPrefetchingAssetPage: (value: boolean) => void;
   setPrefetchingFavoriteAssetPage: (value: boolean) => void;
+  setFirstGalleryPageFailed: (value: boolean) => void;
 };
 
 export function useStudioGalleryPageEffects({
@@ -55,12 +54,10 @@ export function useStudioGalleryPageEffects({
   assetFeedHasMore,
   assetFeedNextOffset,
   loadingMoreAssets,
-  prefetchingAssetPage,
   prefetchedAssetPage,
   favoriteAssetFeedHasMore,
   favoriteAssetFeedNextOffset,
   loadingMoreFavoriteAssets,
-  prefetchingFavoriteAssetPage,
   prefetchedFavoriteAssetPage,
   favoritesOnly,
   galleryKindFilter,
@@ -82,26 +79,36 @@ export function useStudioGalleryPageEffects({
   setPrefetchedFavoriteAssetPage,
   setPrefetchingAssetPage,
   setPrefetchingFavoriteAssetPage,
+  setFirstGalleryPageFailed,
 }: StudioGalleryPageEffectsOptions) {
   const assetQueryScopeKey = useMemo(
     () => JSON.stringify({ projectId: activeProjectId ?? null, kind: galleryKindFilter, model: galleryModelFilter }),
     [activeProjectId, galleryKindFilter, galleryModelFilter],
   );
-  const skippedInitialAssetPageFetchRef = useRef(false);
+  const serverSeedQueryScopeRef = useRef(skipInitialAssetPageFetch ? assetQueryScopeKey : null);
 
   useEffect(() => {
+    if (favoritesOnly || assetQueryScopeKey !== serverSeedQueryScopeRef.current) {
+      serverSeedQueryScopeRef.current = null;
+    }
     if (favoritesOnly) {
       return;
     }
-    if (skipInitialAssetPageFetch && !skippedInitialAssetPageFetchRef.current) {
-      skippedInitialAssetPageFetchRef.current = true;
+    if (skipInitialAssetPageFetch && serverSeedQueryScopeRef.current === assetQueryScopeKey) {
       return;
     }
     let cancelled = false;
+    setFirstGalleryPageFailed(false);
     setPrefetchedAssetPage(null);
+    setAssetFeedHasMore(false);
+    setAssetFeedNextOffset(null);
     void fetchAssetPage({ offset: 0, limitOverride: INITIAL_ASSET_PAGE_SIZE, silent: true })
       .then((payload) => {
-        if (cancelled || !payload) {
+        if (cancelled) {
+          return;
+        }
+        if (!payload) {
+          setFirstGalleryPageFailed(true);
           return;
         }
         setLocalAssets(payload.assets ?? []);
@@ -123,10 +130,18 @@ export function useStudioGalleryPageEffects({
       return;
     }
     let cancelled = false;
+    setFirstGalleryPageFailed(false);
     setFavoritesLoading(true);
+    setFavoriteAssetFeedHasMore(false);
+    setFavoriteAssetFeedNextOffset(null);
+    setPrefetchedFavoriteAssetPage(null);
     void fetchAssetPage({ offset: 0, favorited: true, limitOverride: INITIAL_ASSET_PAGE_SIZE })
       .then((payload) => {
-        if (cancelled || !payload) {
+        if (cancelled) {
+          return;
+        }
+        if (!payload) {
+          setFirstGalleryPageFailed(true);
           return;
         }
         setFavoriteAssets(payload.assets ?? []);
@@ -151,7 +166,6 @@ export function useStudioGalleryPageEffects({
       !assetFeedHasMore ||
       assetFeedNextOffset == null ||
       loadingMoreAssets ||
-      prefetchingAssetPage ||
       prefetchedAssetPage
     ) {
       return;
@@ -182,6 +196,7 @@ export function useStudioGalleryPageEffects({
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
+      setPrefetchingAssetPage(false);
     };
   }, [
     activeProjectId,
@@ -190,9 +205,10 @@ export function useStudioGalleryPageEffects({
     assetPageLimit,
     favoritesOnly,
     galleryScrollArmed,
+    galleryKindFilter,
+    galleryModelFilter,
     loadingMoreAssets,
     prefetchedAssetPage,
-    prefetchingAssetPage,
   ]);
 
   useEffect(() => {
@@ -202,7 +218,6 @@ export function useStudioGalleryPageEffects({
       !favoriteAssetFeedHasMore ||
       favoriteAssetFeedNextOffset == null ||
       loadingMoreFavoriteAssets ||
-      prefetchingFavoriteAssetPage ||
       prefetchedFavoriteAssetPage
     ) {
       return;
@@ -238,6 +253,7 @@ export function useStudioGalleryPageEffects({
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
+      setPrefetchingFavoriteAssetPage(false);
     };
   }, [
     favoriteAssetFeedHasMore,
@@ -249,6 +265,5 @@ export function useStudioGalleryPageEffects({
     activeProjectId,
     loadingMoreFavoriteAssets,
     prefetchedFavoriteAssetPage,
-    prefetchingFavoriteAssetPage,
   ]);
 }

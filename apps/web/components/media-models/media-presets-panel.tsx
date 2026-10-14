@@ -3,6 +3,7 @@
 import { Clapperboard, Edit3, Plus, Upload } from "lucide-react";
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
+import { useMediaPresetPages } from "@/hooks/use-media-preset-pages";
 import { AdminButton, adminButtonIconLabelClassName } from "@/components/admin-controls";
 import { AdminNavButton } from "@/components/admin-nav-button";
 import {
@@ -23,11 +24,10 @@ type MediaPresetsPanelProps = {
   presets: MediaPreset[];
   total?: number;
   nextOffset?: number | null;
+  seedValid?: boolean;
   isImporting: boolean;
   onImportClick: () => void;
 };
-
-const ADMIN_PRESET_PAGE_SIZE = 60;
 
 function presetModelLabels(preset: MediaPreset) {
   const scopedModels = preset.applies_to_models?.length ? preset.applies_to_models : preset.model_key ? [preset.model_key] : [];
@@ -43,77 +43,30 @@ export function MediaPresetsPanel({
   presets,
   total,
   nextOffset,
+  seedValid = false,
   isImporting,
   onImportClick,
 }: MediaPresetsPanelProps) {
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query);
-  const [localPresets, setLocalPresets] = useState<MediaPreset[]>(presets);
-  const [localTotal, setLocalTotal] = useState(total ?? presets.length);
-  const [localNextOffset, setLocalNextOffset] = useState<number | null>(nextOffset ?? null);
-  const [loading, setLoading] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const seed = useMemo(() => seedValid ? { presets, total: total ?? presets.length, offset: 0, next_offset: nextOffset ?? null } : null, [nextOffset, presets, seedValid, total]);
+  const { page, loading, loadingMore, error: loadError, loadMore, retry } = useMediaPresetPages({ query: deferredQuery, view: "full", seed, refreshKey: presets });
+  const localPresets = page?.presets ?? [];
+  const localTotal = page?.total ?? 0;
+  const localNextOffset = page?.next_offset ?? null;
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    setLocalPresets(presets);
-    setLocalTotal(total ?? presets.length);
-    setLocalNextOffset(nextOffset ?? null);
-  }, [nextOffset, presets, total]);
-
-  async function loadPresetPage(offset: number, mode: "replace" | "append") {
-    setLoading(true);
-    setLoadError(null);
-    try {
-      const params = new URLSearchParams({
-        limit: String(ADMIN_PRESET_PAGE_SIZE),
-        offset: String(offset),
-        status: "active",
-      });
-      if (deferredQuery.trim()) params.set("q", deferredQuery.trim());
-      const response = await fetch(`/api/control/media-presets?${params.toString()}`);
-      const payload = (await response.json()) as {
-        ok?: boolean;
-        error?: string;
-        presets?: MediaPreset[];
-        total?: number;
-        next_offset?: number | null;
-      };
-      if (!response.ok || payload.ok === false) {
-        throw new Error(payload.error ?? "Unable to load presets.");
-      }
-      const nextPresets = payload.presets ?? [];
-      setLocalPresets((current) => (mode === "append" ? [...current, ...nextPresets] : nextPresets));
-      setLocalTotal(Number(payload.total ?? nextPresets.length));
-      setLocalNextOffset(payload.next_offset ?? null);
-    } catch (error) {
-      setLoadError(error instanceof Error ? error.message : "Unable to load presets.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    void loadPresetPage(0, "replace");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deferredQuery]);
-
-  useEffect(() => {
-    if (localNextOffset == null || loading || typeof IntersectionObserver === "undefined") return;
+    if (localNextOffset == null || loading || loadingMore || loadError || typeof IntersectionObserver === "undefined") return;
     const element = loadMoreRef.current;
     if (!element) return;
     const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) {
-          void loadPresetPage(localNextOffset, "append");
-        }
-      },
+      (entries) => { if (entries.some((entry) => entry.isIntersecting)) void loadMore(); },
       { rootMargin: "420px 0px" },
     );
     observer.observe(element);
     return () => observer.disconnect();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, localNextOffset, deferredQuery]);
+  }, [loadError, loadMore, loading, loadingMore, localNextOffset]);
 
   const visiblePresets = useMemo(
     () => localPresets.filter((preset) => preset.source_kind !== "builtin"),
@@ -170,6 +123,7 @@ export function MediaPresetsPanel({
         {loadError ? (
           <CalloutPanel tone="warning" className="text-sm leading-7">
             {loadError}
+            <AdminButton variant="subtle" onClick={retry}>Retry loading presets</AdminButton>
           </CalloutPanel>
         ) : null}
 
@@ -231,10 +185,10 @@ export function MediaPresetsPanel({
           <div ref={loadMoreRef} className="flex justify-center">
             <AdminButton
               variant="subtle"
-              onClick={() => void loadPresetPage(localNextOffset, "append")}
-              disabled={loading}
+              onClick={() => void loadMore()}
+              disabled={loading || loadingMore}
             >
-              {loading ? "Loading..." : "Load more presets"}
+              {loadingMore ? "Loading..." : "Load more presets"}
             </AdminButton>
           </div>
         ) : null}

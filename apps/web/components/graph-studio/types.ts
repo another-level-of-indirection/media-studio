@@ -358,15 +358,24 @@ export type GraphGroup = {
   execution?: { mode?: string | null } | null;
 };
 
-export type GraphWorkflowRecord = {
+export type GraphWorkflowSummary = {
   workflow_id: string;
   name: string;
   description?: string | null;
   status?: string;
   schema_version?: number;
-  workflow_json?: GraphWorkflowPayload;
   created_at?: string | null;
   updated_at?: string | null;
+};
+
+export type GraphWorkflowRecord = GraphWorkflowSummary & { workflow_json?: GraphWorkflowPayload };
+
+export type GraphWorkflowSummaryPage = {
+  items: GraphWorkflowSummary[];
+  total: number;
+  limit: number;
+  offset: number;
+  next_offset: number | null;
 };
 
 export type GraphTemplateRecord = {

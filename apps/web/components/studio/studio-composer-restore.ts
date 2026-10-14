@@ -11,7 +11,7 @@ import {
   buildStudioRetryRestorePlan,
   isSeedanceModel,
 } from "@/lib/media-studio-helpers";
-import type { MediaAsset } from "@/lib/types";
+import type { MediaAsset, MediaPreset } from "@/lib/types";
 
 export type StudioRetryRestorePlan = ReturnType<typeof buildStudioRetryRestorePlan>;
 export type StudioRetryPrimaryInput = ReturnType<typeof buildStudioJobPrimaryInput>;
@@ -36,7 +36,7 @@ export type RestoreComposerDependencies = {
   replaceStudioHistory: (projectId: string | null) => void;
   clearComposer: () => void;
   setModelKey: (value: string) => void;
-  applyPresetSelection: (value: string, options?: { preferredModelKey?: string | null }) => void;
+  applyPresetSelection: (value: string, options?: { preferredModelKey?: string | null; presetOverride?: MediaPreset | null }) => void;
   setSelectedPresetId: (value: string) => void;
   setSelectedPromptIds: (value: string[]) => void;
   setPrompt: (value: string) => void;
@@ -314,6 +314,7 @@ export async function restoreComposerFromPlan({
   if (targetPreset) {
     dependencies.applyPresetSelection(targetPreset.preset_id ?? targetPreset.key, {
       preferredModelKey: targetModel.key,
+      presetOverride: targetPreset,
     });
   } else {
     dependencies.setSelectedPresetId("");

@@ -6,7 +6,9 @@ import { Blocks, Search, Trash2, Upload, Workflow, X } from "lucide-react";
 import { GraphNodeTypeBadge } from "./components/graph-node-type-badge";
 import { GraphRunHistoryPanel } from "./graph-run-history-panel";
 import { GraphTemplateBrowser } from "./graph-template-browser";
-import type { GraphArtifact, GraphNodeDefinition, GraphRunHistoryItem, GraphTemplateRecord, GraphWorkflowRecord } from "./types";
+import type { GraphWorkflowBrowser } from "./hooks/use-graph-workflow-browser";
+import { useGraphWorkflowSelection, type GraphWorkflowSelectionHandler } from "./hooks/use-graph-workflow-selection";
+import type { GraphArtifact, GraphNodeDefinition, GraphRunHistoryItem, GraphTemplateRecord, GraphWorkflowSummary } from "./types";
 import { graphDefinitionHiddenInSearch, rankGraphNodeDefinitions } from "./hooks/use-graph-node-search";
 import { formatGraphTimestamp } from "./utils/graph-time";
 
@@ -23,7 +25,8 @@ export function GraphLibraryDialog({
   sidebarDialog,
   definitions,
   definitionsByCategory,
-  workflows,
+  workflowBrowser,
+  workspaceKey,
   templates,
   workflowId,
   runHistory,
@@ -45,7 +48,8 @@ export function GraphLibraryDialog({
   sidebarDialog: GraphSidebarDialog | null;
   definitions: GraphNodeDefinition[];
   definitionsByCategory: Record<string, GraphNodeDefinition[]>;
-  workflows: GraphWorkflowRecord[];
+  workflowBrowser: GraphWorkflowBrowser;
+  workspaceKey: string;
   templates: GraphTemplateRecord[];
   workflowId: string | null;
   runHistory: GraphRunHistoryItem[];
@@ -53,9 +57,9 @@ export function GraphLibraryDialog({
   selectedRunArtifacts: GraphArtifact[];
   onClose: () => void;
   onLoadStarterTemplate: () => void;
-  onLoadWorkflow: (workflow: GraphWorkflowRecord) => void;
+  onLoadWorkflow: GraphWorkflowSelectionHandler;
   onInstantiateTemplate: (template: GraphTemplateRecord) => void;
-  onDeleteWorkflow: (workflow: GraphWorkflowRecord) => void;
+  onDeleteWorkflow: (workflow: GraphWorkflowSummary) => void;
   onDeleteTemplate: (template: GraphTemplateRecord) => void;
   onImportWorkflow: () => void;
   onAddDefinitionNode: (definition: GraphNodeDefinition) => void;
@@ -64,6 +68,8 @@ export function GraphLibraryDialog({
   onRestoreRun: (run: GraphRunHistoryItem) => void | Promise<void>;
   onPinArtifact: (artifact: GraphArtifact) => void;
 }) {
+  const { workflows, query, setQuery, loading, error, refresh, offset, setOffset, nextOffset, total } = workflowBrowser;
+  const selection = useGraphWorkflowSelection(sidebarDialog === "workflows", workspaceKey, onLoadWorkflow);
   const [nodeLibraryQuery, setNodeLibraryQuery] = useState("");
   const starterTemplateReady = STARTER_TEMPLATE_NODE_TYPES.every((type) =>
     definitions.some((definition) => definition.type === type),
@@ -116,10 +122,18 @@ export function GraphLibraryDialog({
             </span>
           </button>
           <div className="graph-section-title">Saved Workflows</div>
-          {workflows.length ? (
+          <label className="graph-dialog-search">
+            <Search size={15} />
+            <input aria-label="Search workflows" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search workflows..." autoComplete="off" />
+          </label>
+          {loading ? <div className="graph-sidebar-empty" role="status">Loading workflows...</div> : null}
+          {selection.loadingId ? <div className="graph-sidebar-empty" role="status">Opening workflow...</div> : null}
+          {selection.error ? <div className="graph-sidebar-empty" role="alert">Could not open workflow: {selection.error}. Select it to retry.</div> : null}
+          {error ? <div className="graph-sidebar-empty" role="alert">Could not load workflows: {error} <button type="button" onClick={() => void refresh()}>Retry workflows</button></div> : null}
+          {!loading && !error && workflows.length ? (
             workflows.map((workflow) => (
               <div className="graph-dialog-row graph-workflow-row" key={workflow.workflow_id}>
-                <button className="graph-workflow-load-button" type="button" onClick={() => onLoadWorkflow(workflow)}>
+                <button className="graph-workflow-load-button" type="button" disabled={selection.loadingId === workflow.workflow_id} onClick={() => void selection.select(workflow.workflow_id)}>
                   <span className="graph-dialog-row-icon">
                     <Workflow size={17} />
                   </span>
@@ -139,9 +153,14 @@ export function GraphLibraryDialog({
                 </button>
               </div>
             ))
-          ) : (
-            <div className="graph-sidebar-empty">No saved workflows yet.</div>
-          )}
+          ) : !loading && !error ? (
+            <div className="graph-sidebar-empty">{query.trim() ? "No matching workflows." : "No saved workflows yet."}</div>
+          ) : null}
+          <div className="graph-template-browser-header">
+            <button type="button" aria-label="Previous workflows page" disabled={loading || offset === 0} onClick={() => setOffset(Math.max(0, offset - 60))}>Previous</button>
+            <span>{!loading && !error ? `${total ? offset + 1 : 0}–${offset + workflows.length} of ${total}` : ""}</span>
+            <button type="button" aria-label="Next workflows page" disabled={loading || Boolean(error) || nextOffset === null} onClick={() => { if (nextOffset !== null) setOffset(nextOffset); }}>Next</button>
+          </div>
           <GraphTemplateBrowser templates={templates} onInstantiate={onInstantiateTemplate} onDeleteTemplate={onDeleteTemplate} />
         </div>
       ) : null}

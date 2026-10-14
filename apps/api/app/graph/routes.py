@@ -41,6 +41,7 @@ from .schemas import (
     GraphWorkflow,
     GraphWorkflowListResponse,
     GraphWorkflowRecord,
+    GraphWorkflowSummaryListResponse,
 )
 from .validator import validate_workflow
 
@@ -211,6 +212,15 @@ def list_workflows() -> GraphWorkflowListResponse:
             for item in store.list_graph_workflows()
         ]
     )
+
+
+@router.get("/workflows/summary", response_model=GraphWorkflowSummaryListResponse)
+def list_workflow_summaries(
+    limit: int = Query(default=60, ge=1, le=60),
+    offset: int = Query(default=0, ge=0),
+    q: Optional[str] = Query(default=None),
+) -> GraphWorkflowSummaryListResponse:
+    return GraphWorkflowSummaryListResponse(**store.list_graph_workflow_summaries(limit=limit, offset=offset, q=q))
 
 
 @router.post("/workflows", response_model=GraphWorkflowRecord)
@@ -430,9 +440,17 @@ def recover_run(run_id: str) -> GraphRun:
 
 @router.get("/templates", response_model=GraphTemplateListResponse)
 def list_templates() -> GraphTemplateListResponse:
+    definitions_by_type = registry.definitions_by_type()
+    recipe_catalog_items = prompt_recipe_catalog(status="all")
+    preset_catalog_items = media_preset_catalog(status="all")
     items: List[GraphTemplateRecord] = []
     for item in store.list_graph_templates():
-        workflow = materialize_workflow_defaults(GraphWorkflow(**(item.get("workflow_json") or {})))
+        workflow = materialize_workflow_defaults(
+            GraphWorkflow(**(item.get("workflow_json") or {})),
+            definitions_by_type=definitions_by_type,
+            recipe_catalog_items=recipe_catalog_items,
+            preset_catalog_items=preset_catalog_items,
+        )
         items.append(GraphTemplateRecord(**{**item, "workflow_json": workflow.model_dump(mode="json")}))
     return GraphTemplateListResponse(items=items)
 

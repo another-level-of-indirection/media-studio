@@ -31,12 +31,10 @@ function EffectsHarness({
     assetFeedHasMore: true,
     assetFeedNextOffset: 18,
     loadingMoreAssets: false,
-    prefetchingAssetPage: false,
     prefetchedAssetPage: null,
     favoriteAssetFeedHasMore: false,
     favoriteAssetFeedNextOffset: null,
     loadingMoreFavoriteAssets: false,
-    prefetchingFavoriteAssetPage: false,
     prefetchedFavoriteAssetPage: null,
     favoritesOnly: false,
     galleryKindFilter,
@@ -58,6 +56,7 @@ function EffectsHarness({
     setPrefetchedFavoriteAssetPage: vi.fn(),
     setPrefetchingAssetPage: vi.fn(),
     setPrefetchingFavoriteAssetPage: vi.fn(),
+    setFirstGalleryPageFailed: vi.fn(),
   });
 
   return null;

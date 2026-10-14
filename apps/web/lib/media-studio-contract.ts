@@ -28,6 +28,7 @@ export type MediaStudioProps = {
   initialAssetOffset?: number;
   initialAssetsHasMore?: boolean;
   initialAssetsNextOffset?: number | null;
+  initialAssetsNextCursor?: string | null;
   latestAsset: MediaAsset | null;
   remainingCredits?: number | null;
   pricingSnapshot?: Record<string, unknown> | null;
@@ -60,6 +61,7 @@ export type AssetPagePayload = {
   offset?: number | null;
   has_more?: boolean;
   next_offset?: number | null;
+  next_cursor?: string | null;
 };
 
 export type ComposerStatusTone = "healthy" | "warning" | "danger";

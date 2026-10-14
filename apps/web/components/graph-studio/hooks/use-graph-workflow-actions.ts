@@ -1,9 +1,11 @@
-import { useCallback, useState } from "react";
+import { useCallback } from "react";
 
-import type { GraphRun, GraphWorkflowPayload, GraphWorkflowRecord, StudioEdge, StudioNode } from "../types";
+import type { GraphRun, GraphWorkflowPayload, GraphWorkflowRecord, GraphWorkflowSummary, StudioEdge, StudioNode } from "../types";
 import { jsonFetch } from "../utils/graph-api";
+import { useGraphWorkflowBrowser } from "./use-graph-workflow-browser";
 
 export function useGraphWorkflowActions({
+  browserOpen = false,
   workflowId,
   workflowName,
   renameDraft,
@@ -22,6 +24,7 @@ export function useGraphWorkflowActions({
   setRenameDialogOpen,
   appendConsole,
 }: {
+  browserOpen?: boolean;
   workflowId: string | null;
   workflowName: string;
   renameDraft: string;
@@ -40,12 +43,8 @@ export function useGraphWorkflowActions({
   setRenameDialogOpen: (open: boolean) => void;
   appendConsole: (line: string) => void;
 }) {
-  const [workflows, setWorkflows] = useState<GraphWorkflowRecord[]>([]);
-
-  const refreshWorkflows = useCallback(async () => {
-    const payload = await jsonFetch<{ items?: GraphWorkflowRecord[] }>("/api/control/media/graph/workflows");
-    setWorkflows(payload.items ?? []);
-  }, []);
+  const workflowBrowser = useGraphWorkflowBrowser(browserOpen);
+  const refreshWorkflows = workflowBrowser.refresh;
 
   const saveWorkflow = useCallback(async (nextName = workflowName, nextWorkflowId = workflowId) => {
     const payload = workflowFromCanvas(nextWorkflowId, nextName, nodes, edges);
@@ -117,7 +116,7 @@ export function useGraphWorkflowActions({
   }, [onCloseWorkspace, setConsoleLines, setEdges, setNodes, setRenameDialogOpen, setRun, setWorkflowId, setWorkflowMenuOpen, setWorkflowName, setWorkflowUpdatedAt]);
 
   const deleteWorkflowRecord = useCallback(
-    async (record: GraphWorkflowRecord) => {
+    async (record: GraphWorkflowSummary) => {
       await jsonFetch(`/api/control/media/graph/workflows/${record.workflow_id}`, { method: "DELETE" });
       appendConsole(`Deleted workflow ${record.name || record.workflow_id}.`);
       if (record.workflow_id === workflowId) {
@@ -129,8 +128,7 @@ export function useGraphWorkflowActions({
   );
 
   return {
-    workflows,
-    refreshWorkflows,
+    workflowBrowser,
     saveWorkflow,
     saveWorkflowAs,
     openRenameWorkflow,

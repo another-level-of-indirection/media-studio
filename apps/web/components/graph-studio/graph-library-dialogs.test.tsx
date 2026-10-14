@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { GraphLibraryDialog } from "@/components/graph-studio/graph-library-dialogs";
@@ -25,7 +25,8 @@ function renderLibraryDialog(
     sidebarDialog: "nodes",
     definitions: [],
     definitionsByCategory: {},
-    workflows: [],
+    workspaceKey: "test-workspace",
+    workflowBrowser: { workflows: [], query: "", setQuery: vi.fn(), offset: 0, setOffset: vi.fn(), nextOffset: null, total: 0, loading: false, error: null, refresh: vi.fn(async () => undefined) },
     templates: [],
     references: [],
     assets: [],
@@ -54,6 +55,7 @@ function renderLibraryDialog(
 describe("GraphLibraryDialog", () => {
   afterEach(() => {
     cleanup();
+    vi.unstubAllGlobals();
   });
 
   it("hides hidden internal definitions from the default node library", () => {
@@ -99,5 +101,21 @@ describe("GraphLibraryDialog", () => {
 
     rerender(<GraphLibraryDialog {...props} definitions={definitions} />);
     expect(starter.hasAttribute("disabled")).toBe(false);
+  });
+
+  it("offers server search and bounded paging, with detail and archive handoffs", async () => {
+    const workflow = { workflow_id: "outside-first-page", name: "Outside first page" };
+    const browser = { workflows: [workflow], query: "", setQuery: vi.fn(), offset: 0, setOffset: vi.fn(), nextOffset: 60, total: 65, loading: false, error: null, refresh: vi.fn(async () => undefined) };
+    const detail = { ...workflow, workflow_json: { nodes: [], edges: [] } };
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json(detail)));
+    const { props } = renderLibraryDialog({ sidebarDialog: "workflows", workflowBrowser: browser });
+    fireEvent.change(screen.getByRole("textbox", { name: "Search workflows" }), { target: { value: "Outside" } });
+    expect(browser.setQuery).toHaveBeenCalledWith("Outside");
+    fireEvent.click(screen.getByRole("button", { name: "Next workflows page" }));
+    expect(browser.setOffset).toHaveBeenCalledWith(60);
+    fireEvent.click(screen.getByRole("button", { name: /^Outside first pageoutside-first-page$/ }));
+    await waitFor(() => expect(props.onLoadWorkflow).toHaveBeenCalledWith(detail, expect.any(Function)));
+    fireEvent.click(screen.getByRole("button", { name: "Delete workflow Outside first page" }));
+    expect(props.onDeleteWorkflow).toHaveBeenCalledWith(workflow);
   });
 });

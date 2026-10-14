@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from .db_backup import backup_database
-from .store_preset_search import preset_search_sql, normalize_search_text
+from .store_preset_listing import list_presets, list_presets_page
 from .db import get_connection
 from .settings import settings
 from .store_support import (
@@ -59,6 +59,7 @@ from .store_graph import (
     list_graph_runs_for_workflow,
     list_graph_templates,
     list_graph_workflows,
+    list_graph_workflow_summaries,
     mark_interrupted_graph_runs,
     update_graph_run,
     update_graph_run_node,
@@ -192,63 +193,6 @@ def get_model_queue_policy(model_key: str) -> Optional[Dict[str, Any]]:
             (model_key,),
         ).fetchone()
     return _decode_row(row) if row else None
-
-
-def list_presets() -> List[Dict[str, Any]]:
-    with get_connection() as connection:
-        rows = connection.execute(
-            "SELECT * FROM media_presets WHERE status != 'archived' ORDER BY priority DESC, updated_at DESC, key ASC"
-        ).fetchall()
-    return [_decode_row(row) for row in rows]
-
-
-def list_presets_page(
-    *,
-    limit: int = 60,
-    offset: int = 0,
-    q: Optional[str] = None,
-    category: Optional[str] = None,
-    status: str = "active",
-) -> Dict[str, Any]:
-    safe_limit = max(1, min(int(limit or 60), 100))
-    safe_offset = max(0, int(offset or 0))
-    clauses: List[str] = []
-    params: List[Any] = []
-    normalized_status = (status or "active").strip().lower()
-    if normalized_status == "all":
-        clauses.append("1 = 1")
-    elif normalized_status == "archived":
-        clauses.append("status = ?")
-        params.append("archived")
-    else:
-        clauses.append("status != ?")
-        params.append("archived")
-    search_clause, search_params, search_order, order_params = preset_search_sql(q)
-    if search_clause:
-        clauses.append(search_clause)
-        params.extend(search_params)
-    normalized_category = (category or "").strip().lower()
-    if normalized_category and normalized_category != "all":
-        clauses.append("lower(COALESCE(category, 'general')) = ?")
-        params.append(normalized_category)
-    where_sql = " AND ".join(clauses)
-    with get_connection() as connection:
-        connection.create_function("preset_search_normalize", 1, normalize_search_text, deterministic=True)
-        total_row = connection.execute(f"SELECT COUNT(*) AS total FROM media_presets WHERE {where_sql}", params).fetchone()
-        rows = connection.execute(
-            f"""
-            SELECT *
-            FROM media_presets
-            WHERE {where_sql}
-            ORDER BY {search_order}priority DESC, updated_at DESC, key ASC
-            LIMIT ? OFFSET ?
-            """,
-            [*params, *order_params, safe_limit, safe_offset],
-        ).fetchall()
-    total = int(total_row["total"] if total_row else 0)
-    items = [_decode_row(row) for row in rows]
-    next_offset = safe_offset + len(items) if safe_offset + len(items) < total else None
-    return {"items": items, "total": total, "limit": safe_limit, "offset": safe_offset, "next_offset": next_offset}
 
 
 def get_preset(preset_id: str) -> Optional[Dict[str, Any]]:
@@ -629,12 +573,24 @@ def list_assets(
     project_id: Optional[str] = None,
     compact: bool = False,
     q: Optional[str] = None,
+    cursor_mode: str = "timestamp",
 ) -> List[Dict[str, Any]]:
     clauses = ["dismissed = 0", "hidden_from_dashboard = 0"]
     params: List[Any] = []
     if cursor:
-        clauses.append("created_at < ?")
-        params.append(cursor)
+        if cursor_mode == "asset_id":
+            with get_connection() as connection:
+                anchor = connection.execute(
+                    "SELECT created_at, rowid FROM media_assets WHERE asset_id = ?",
+                    (cursor,),
+                ).fetchone()
+            if not anchor:
+                raise ValueError("Invalid gallery continuation. Reload the gallery to restart.")
+            clauses.append("(created_at < ? OR (created_at = ? AND rowid > ?))")
+            params.extend([anchor["created_at"], anchor["created_at"], anchor["rowid"]])
+        else:
+            clauses.append("created_at < ?")
+            params.append(cursor)
     if favorites_only:
         clauses.append("favorited = 1")
     if media_type == "image":
@@ -683,7 +639,9 @@ def list_assets(
         if compact
         else "*"
     )
-    query = "SELECT %s FROM media_assets WHERE %s ORDER BY created_at DESC LIMIT ?" % (columns, " AND ".join(clauses))
+    # SQLite's existing timestamp sort retains rowid order inside ties.
+    order = "created_at DESC, rowid ASC" if cursor_mode == "asset_id" else "created_at DESC"
+    query = "SELECT %s FROM media_assets WHERE %s ORDER BY %s LIMIT ?" % (columns, " AND ".join(clauses), order)
     params.append(limit)
     with get_connection() as connection:
         rows = connection.execute(query, params).fetchall()

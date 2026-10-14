@@ -11,6 +11,7 @@ import type {
   MediaAssetSummaryResponse,
   MediaAssetsResponse,
 } from "@/lib/types";
+import { decodeStudioGalleryCursor, encodeStudioGalleryCursor } from "@/lib/studio-gallery-cursor";
 import { boundedIntegerParam } from "../pagination";
 
 const CONTROL_ASSET_PAGE_LIMIT = 100;
@@ -74,6 +75,52 @@ export async function GET(request: Request) {
   }
   if (view === "picker" || view === "summary") {
     baseParams.set("compact", "true");
+  }
+
+  const cursorToken = url.searchParams.get("cursor");
+  if (url.searchParams.get("pagination") === "cursor" || cursorToken !== null) {
+    baseParams.set("cursor_mode", "asset_id");
+    const continuation = cursorToken === null
+      ? null
+      : decodeStudioGalleryCursor(cursorToken, baseParams, view);
+    if (
+      (cursorToken !== null && !continuation) ||
+      (cursorToken === null && offset !== 0) ||
+      (continuation && url.searchParams.has("offset") && offset !== continuation.offset)
+    ) {
+      return NextResponse.json({
+        ok: false,
+        error: "Invalid gallery continuation. Reload the gallery to restart.",
+      }, { status: 400 });
+    }
+    const pageOffset = continuation?.offset ?? 0;
+    const endpointParams = new URLSearchParams(baseParams);
+    endpointParams.set("limit", String(limit));
+    if (continuation) {
+      endpointParams.set("cursor", continuation.cursor);
+    }
+    const result = await getControlApiJson<{
+      items?: Record<string, unknown>[];
+      next_cursor?: string | null;
+    }>(`/media/assets?${endpointParams.toString()}`, "read");
+    if (!result.ok || !result.data?.items) {
+      return NextResponse.json({
+        ok: false,
+        error: result.error ?? "Unable to load media assets from the Control API.",
+      }, { status: 502 });
+    }
+    const assets = result.data.items.map(mapAssetForView);
+    const nextOffset = pageOffset + assets.length;
+    const nextCursor = encodeStudioGalleryCursor(result.data.next_cursor, nextOffset, baseParams, view);
+    return NextResponse.json({
+      ok: true,
+      assets,
+      limit,
+      offset: pageOffset,
+      has_more: Boolean(nextCursor),
+      next_offset: nextCursor ? nextOffset : null,
+      next_cursor: nextCursor,
+    });
   }
 
   let remainingOffset = offset;

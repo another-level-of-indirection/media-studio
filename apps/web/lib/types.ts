@@ -793,6 +793,7 @@ export type MediaPreset = {
   requires_image?: boolean;
   requires_video?: boolean;
   requires_audio?: boolean;
+  image_input_policy?: "none" | "optional" | "required";
   input_schema_json?: Array<Record<string, unknown>>;
   input_slots_json?: Array<Record<string, unknown> | string>;
   thumbnail_path?: string | null;
@@ -821,6 +822,7 @@ export type MediaPresetSummaryItem = Pick<
   | "requires_image"
   | "requires_video"
   | "requires_audio"
+  | "image_input_policy"
   | "thumbnail_path"
   | "thumbnail_url"
   | "version"
@@ -1419,6 +1421,7 @@ export type MediaAssetsResponse = {
   offset?: number;
   has_more?: boolean;
   next_offset?: number | null;
+  next_cursor?: string | null;
 };
 
 export type MediaAssetPickerResponse = {
@@ -1428,6 +1431,7 @@ export type MediaAssetPickerResponse = {
   offset?: number;
   has_more?: boolean;
   next_offset?: number | null;
+  next_cursor?: string | null;
 };
 
 export type MediaAssetSummaryResponse = {
@@ -1437,6 +1441,7 @@ export type MediaAssetSummaryResponse = {
   offset?: number;
   has_more?: boolean;
   next_offset?: number | null;
+  next_cursor?: string | null;
 };
 
 export type MediaAssetResponse = {

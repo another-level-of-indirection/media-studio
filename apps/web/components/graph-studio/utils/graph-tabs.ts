@@ -319,7 +319,7 @@ export function graphTabOpenWorkflowTarget(
     ? tabs.map((tab) => (tab.tab_id === activeTabId ? applyGraphTabSnapshot(tab, activeSnapshot) : tab))
     : tabs;
   const existing = targetTab.workflow_id
-    ? tabsWithActiveSnapshot.find((tab) => tab.workflow_id === targetTab.workflow_id)
+    ? tabsWithActiveSnapshot.find((tab) => tab.workflow_id === targetTab.workflow_id && !tab.dirty)
     : null;
   if (existing) {
     return {

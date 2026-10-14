@@ -9,6 +9,7 @@ import {
 import type { MediaAsset, MediaModelSummary } from "@/lib/types";
 
 type StudioComposerGuardEffectsOptions = {
+  presetReady: boolean;
   models: MediaModelSummary[];
   enabledModels: MediaModelSummary[];
   studioReadyModels: MediaModelSummary[];
@@ -41,13 +42,14 @@ type StudioComposerGuardEffectsOptions = {
   setSourceAssetId: React.Dispatch<React.SetStateAction<string | number | null>>;
   setLastStructuredPresetModelKey: (value: string) => void;
   setOutputCount: React.Dispatch<React.SetStateAction<number>>;
-  setOptionValues: (value: Record<string, unknown>) => void;
-  setPresetInputValues: (value: Record<string, string>) => void;
+  setOptionValues: React.Dispatch<React.SetStateAction<Record<string, unknown>>>;
+  setPresetInputValues: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   setPresetSlotStates: React.Dispatch<React.SetStateAction<Record<string, PresetSlotState>>>;
   setAttachments: React.Dispatch<React.SetStateAction<AttachmentRecord[]>>;
 };
 
 export function useStudioComposerGuardEffects({
+  presetReady,
   models,
   enabledModels,
   studioReadyModels,
@@ -94,6 +96,7 @@ export function useStudioComposerGuardEffects({
       return;
     }
     setModelKey(fallbackKey);
+    setOptionValues(buildNormalizedStudioOptions(models.find((model) => model.key === fallbackKey) ?? null, {}, null));
     setSelectedPresetId("");
     setSelectedPromptIds([]);
     setValidation(null);
@@ -120,6 +123,7 @@ export function useStudioComposerGuardEffects({
       return;
     }
     setModelKey(fallbackKey);
+    setOptionValues(buildNormalizedStudioOptions(models.find((model) => model.key === fallbackKey) ?? null, {}, null));
     setSelectedPresetId("");
     setSelectedPromptIds([]);
     setValidation(null);
@@ -151,13 +155,12 @@ export function useStudioComposerGuardEffects({
   }, [modelMaxOutputs]);
 
   useEffect(() => {
-    setOptionValues(
-      buildNormalizedStudioOptions(currentModel, {}, currentPresetDefaultOptions),
-    );
-  }, [currentModel, currentPresetDefaultOptions, currentPresetId, modelKey]);
+    if (!presetReady) return;
+    setOptionValues((current) => buildNormalizedStudioOptions(currentModel, current, currentPresetDefaultOptions));
+  }, [presetReady, currentModel, currentPresetDefaultOptions, currentPresetId, modelKey]);
 
   useEffect(() => {
-    if (!selectedPresetId || currentPresetCompatibleWithModel) {
+    if (!presetReady || !selectedPresetId || currentPresetCompatibleWithModel) {
       return;
     }
     setSelectedPresetId("");
@@ -171,7 +174,7 @@ export function useStudioComposerGuardEffects({
       return {};
     });
     setValidation(null);
-  }, [currentPresetCompatibleWithModel, selectedPresetId]);
+  }, [presetReady, currentPresetCompatibleWithModel, selectedPresetId]);
 
   useEffect(() => {
     if (seedanceComposer && sourceAssetId != null) {
@@ -181,20 +184,13 @@ export function useStudioComposerGuardEffects({
   }, [seedanceComposer, setSourceAssetId, sourceAssetId]);
 
   useEffect(() => {
+    if (!presetReady) return;
     const nextValues: Record<string, string> = {};
     for (const field of structuredPresetTextFields) {
       nextValues[field.key] = field.defaultValue ?? "";
     }
-    setPresetInputValues(nextValues);
-    setPresetSlotStates((current) => {
-      for (const state of Object.values(current)) {
-        if (state?.previewUrl && state.file) {
-          URL.revokeObjectURL(state.previewUrl);
-        }
-      }
-      return {};
-    });
-  }, [currentPresetId, structuredPresetTextFields]);
+    setPresetInputValues((current) => ({ ...nextValues, ...current }));
+  }, [presetReady, currentPresetId, structuredPresetTextFields]);
 
   useEffect(() => {
     return () => {

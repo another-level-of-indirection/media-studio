@@ -38,7 +38,7 @@ export async function GET(request: Request) {
     limit?: number;
     offset?: number;
     next_offset?: number | null;
-  }>(`/media/presets/search?${params.toString()}`, "read");
+  }>(`/media/presets/search${view === "summary" ? "/summary" : ""}?${params.toString()}`, "read");
 
   if (!result.ok || !result.data) {
     return controlErrorResponse(result.error, "Unable to load media presets.", 502);

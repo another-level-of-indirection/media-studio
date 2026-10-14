@@ -14,12 +14,22 @@ import {
 } from "@/lib/studio-gallery-feed";
 import type { MediaAsset } from "@/lib/types";
 
+export type GalleryPageRequestOwner = {
+  pendingAppends: Set<number>;
+  appendedOffsets: Set<number>;
+  inFlight: Map<string, Promise<AssetPagePayload>>;
+  cursors: Map<number, string>;
+};
+
 type GalleryPageActionParams = {
+  requestOwner: GalleryPageRequestOwner;
+  isCurrentQuery: () => boolean;
   activeProjectId: string | null;
   assetPageLimit: number;
   assetFeedHasMore: boolean;
   assetFeedNextOffset: number | null;
   loadingMoreAssets: boolean;
+  firstGalleryPageFailed: boolean;
   prefetchedAssetPage: AssetPagePayload | null;
   favoritesOnly: boolean;
   favoriteAssetFeedHasMore: boolean;
@@ -40,11 +50,13 @@ type GalleryPageActionParams = {
   setFavoriteAssetFeedNextOffset: Dispatch<SetStateAction<number | null>>;
   setPrefetchedFavoriteAssetPage: Dispatch<SetStateAction<AssetPagePayload | null>>;
   setLoadingMoreFavoriteAssets: Dispatch<SetStateAction<boolean>>;
+  setFirstGalleryPageFailed: Dispatch<SetStateAction<boolean>>;
 };
 
 export function buildStudioGalleryAssetPageParams({
   activeProjectId,
   offset,
+  cursor,
   favorited,
   limit,
   galleryKindFilter,
@@ -52,6 +64,7 @@ export function buildStudioGalleryAssetPageParams({
 }: {
   activeProjectId: string | null;
   offset: number;
+  cursor?: string;
   favorited?: boolean;
   limit: number;
   galleryKindFilter: GalleryKindFilter;
@@ -62,6 +75,12 @@ export function buildStudioGalleryAssetPageParams({
     offset: String(Math.max(0, offset)),
     view: "summary",
   });
+  if (offset <= 0 || cursor) {
+    params.set("pagination", "cursor");
+  }
+  if (cursor) {
+    params.set("cursor", cursor);
+  }
   if (favorited) {
     params.set("favorited", "true");
   }
@@ -78,11 +97,14 @@ export function buildStudioGalleryAssetPageParams({
 }
 
 export function createStudioGalleryPageActions({
+  requestOwner,
+  isCurrentQuery,
   activeProjectId,
   assetPageLimit,
   assetFeedHasMore,
   assetFeedNextOffset,
   loadingMoreAssets,
+  firstGalleryPageFailed,
   prefetchedAssetPage,
   favoritesOnly,
   favoriteAssetFeedHasMore,
@@ -103,6 +125,7 @@ export function createStudioGalleryPageActions({
   setFavoriteAssetFeedNextOffset,
   setPrefetchedFavoriteAssetPage,
   setLoadingMoreFavoriteAssets,
+  setFirstGalleryPageFailed,
 }: GalleryPageActionParams) {
   async function fetchAssetPage({
     offset,
@@ -115,28 +138,52 @@ export function createStudioGalleryPageActions({
     limitOverride?: number;
     silent?: boolean;
   }): Promise<AssetPagePayload | null> {
+    if (!isCurrentQuery()) {
+      return null;
+    }
     const params = buildStudioGalleryAssetPageParams({
       activeProjectId,
       offset,
+      cursor: offset > 0 ? requestOwner.cursors.get(offset) : undefined,
       favorited,
       limit: limitOverride ?? assetPageLimit,
       galleryKindFilter,
       galleryModelFilter,
     });
 
-    try {
-      const response = await fetch(`/api/control/media-assets?${params.toString()}`, {
-        method: "GET",
-        headers: { Accept: "application/json" },
-        cache: "no-store",
+    const requestKey = params.toString();
+    let request = requestOwner.inFlight.get(requestKey);
+    if (!request) {
+      request = (async () => {
+        const response = await fetch(`/api/control/media-assets?${requestKey}`, {
+          method: "GET",
+          headers: { Accept: "application/json" },
+          cache: "no-store",
+        });
+        const payload = (await response.json()) as AssetPagePayload;
+        if (!response.ok || !payload.ok) {
+          throw new Error(payload.error ?? "Unable to load media assets from the dashboard.");
+        }
+        return payload;
+      })().finally(() => {
+        requestOwner.inFlight.delete(requestKey);
       });
-      const payload = (await response.json()) as AssetPagePayload;
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.error ?? "Unable to load media assets from the dashboard.");
+      requestOwner.inFlight.set(requestKey, request);
+    }
+    try {
+      const payload = await request;
+      if (!isCurrentQuery()) {
+        return null;
+      }
+      if (offset === 0) {
+        requestOwner.cursors.clear();
+      }
+      if (payload.next_offset != null && payload.next_cursor) {
+        requestOwner.cursors.set(payload.next_offset, payload.next_cursor);
       }
       return payload;
     } catch (error) {
-      if (!silent) {
+      if (!silent && isCurrentQuery()) {
         onMessage({
           tone: "danger",
           text: error instanceof Error ? error.message : "The dashboard could not load more media assets.",
@@ -146,7 +193,25 @@ export function createStudioGalleryPageActions({
     }
   }
 
+  function claimAppendedPage(page: AssetPagePayload, expectedOffset: number | null) {
+    if (!isCurrentQuery()) {
+      return false;
+    }
+    const offset = page.offset ?? expectedOffset;
+    if (offset != null) {
+      if (requestOwner.appendedOffsets.has(offset)) {
+        return false;
+      }
+      requestOwner.appendedOffsets.add(offset);
+      requestOwner.cursors.delete(offset);
+    }
+    return true;
+  }
+
   function applyLoadedAssetPage(page: AssetPagePayload) {
+    if (!claimAppendedPage(page, assetFeedNextOffset)) {
+      return;
+    }
     const pageAssets = page.assets ?? [];
     setLocalAssets((current) => mergeAssetCollections(current, pageAssets));
     setAssetFeedHasMore(Boolean(page.has_more));
@@ -155,17 +220,25 @@ export function createStudioGalleryPageActions({
   }
 
   function applyRefreshedAssetPage(page: AssetPagePayload) {
+    if (!isCurrentQuery()) {
+      return;
+    }
+    requestOwner.appendedOffsets.clear();
     const pageAssets = page.assets ?? [];
-    setLocalAssets((current) => reconcileAssetCollections(pageAssets, current));
+    setLocalAssets((current) => firstGalleryPageFailed ? pageAssets : reconcileAssetCollections(pageAssets, current));
+    setFirstGalleryPageFailed(false);
     setAssetFeedHasMore(Boolean(page.has_more));
     setAssetFeedNextOffset(page.next_offset ?? null);
     setPrefetchedAssetPage(null);
     if (galleryModelFilter === "all" && galleryKindFilter === "all") {
-      setLocalLatestAsset((currentLatest) => pageAssets[0] ?? currentLatest);
+      setLocalLatestAsset((currentLatest) => pageAssets[0] ?? (firstGalleryPageFailed ? null : currentLatest));
     }
   }
 
   function applyLoadedFavoriteAssetPage(page: AssetPagePayload) {
+    if (!claimAppendedPage(page, favoriteAssetFeedNextOffset)) {
+      return;
+    }
     const pageAssets = page.assets ?? [];
     setFavoriteAssets((current) => mergeAssetCollections(current ?? [], pageAssets));
     setFavoriteAssetFeedHasMore(Boolean(page.has_more));
@@ -174,8 +247,13 @@ export function createStudioGalleryPageActions({
   }
 
   function applyRefreshedFavoriteAssetPage(page: AssetPagePayload) {
+    if (!isCurrentQuery()) {
+      return;
+    }
+    requestOwner.appendedOffsets.clear();
     const pageAssets = page.assets ?? [];
-    setFavoriteAssets((current) => reconcileAssetCollections(pageAssets, current ?? []));
+    setFavoriteAssets((current) => firstGalleryPageFailed ? pageAssets : reconcileAssetCollections(pageAssets, current ?? []));
+    setFirstGalleryPageFailed(false);
     setFavoriteAssetFeedHasMore(Boolean(page.has_more));
     setFavoriteAssetFeedNextOffset(page.next_offset ?? null);
     setPrefetchedFavoriteAssetPage(null);
@@ -221,9 +299,18 @@ export function createStudioGalleryPageActions({
   }
 
   async function loadMoreGalleryAssets() {
-    if (favoritesOnly || loadingMoreAssets || !assetFeedHasMore || assetFeedNextOffset == null) {
+    if (
+      !isCurrentQuery() ||
+      favoritesOnly ||
+      loadingMoreAssets ||
+      !assetFeedHasMore ||
+      assetFeedNextOffset == null ||
+      requestOwner.pendingAppends.has(assetFeedNextOffset) ||
+      requestOwner.appendedOffsets.has(assetFeedNextOffset)
+    ) {
       return;
     }
+    requestOwner.pendingAppends.add(assetFeedNextOffset);
     setLoadingMoreAssets(true);
     try {
       if (prefetchedAssetPage && prefetchedAssetPage.offset === assetFeedNextOffset) {
@@ -236,14 +323,26 @@ export function createStudioGalleryPageActions({
       }
       applyLoadedAssetPage(page);
     } finally {
-      setLoadingMoreAssets(false);
+      requestOwner.pendingAppends.delete(assetFeedNextOffset);
+      if (isCurrentQuery()) {
+        setLoadingMoreAssets(false);
+      }
     }
   }
 
   async function loadMoreFavoriteGalleryAssets() {
-    if (!favoritesOnly || loadingMoreFavoriteAssets || !favoriteAssetFeedHasMore || favoriteAssetFeedNextOffset == null) {
+    if (
+      !isCurrentQuery() ||
+      !favoritesOnly ||
+      loadingMoreFavoriteAssets ||
+      !favoriteAssetFeedHasMore ||
+      favoriteAssetFeedNextOffset == null ||
+      requestOwner.pendingAppends.has(favoriteAssetFeedNextOffset) ||
+      requestOwner.appendedOffsets.has(favoriteAssetFeedNextOffset)
+    ) {
       return;
     }
+    requestOwner.pendingAppends.add(favoriteAssetFeedNextOffset);
     setLoadingMoreFavoriteAssets(true);
     try {
       if (prefetchedFavoriteAssetPage && prefetchedFavoriteAssetPage.offset === favoriteAssetFeedNextOffset) {
@@ -260,16 +359,49 @@ export function createStudioGalleryPageActions({
       }
       applyLoadedFavoriteAssetPage(page);
     } finally {
-      setLoadingMoreFavoriteAssets(false);
+      requestOwner.pendingAppends.delete(favoriteAssetFeedNextOffset);
+      if (isCurrentQuery()) {
+        setLoadingMoreFavoriteAssets(false);
+      }
     }
   }
 
   function loadMoreActiveGalleryAssets() {
+    if (firstGalleryPageFailed) {
+      return retryFirstGalleryPage();
+    }
     if (favoritesOnly) {
-      void loadMoreFavoriteGalleryAssets();
+      return loadMoreFavoriteGalleryAssets();
+    }
+    return loadMoreGalleryAssets();
+  }
+
+  async function retryFirstGalleryPage() {
+    if (
+      !isCurrentQuery() ||
+      requestOwner.pendingAppends.has(0) ||
+      requestOwner.appendedOffsets.has(0)
+    ) {
       return;
     }
-    void loadMoreGalleryAssets();
+    requestOwner.pendingAppends.add(0);
+    const setLoading = favoritesOnly ? setLoadingMoreFavoriteAssets : setLoadingMoreAssets;
+    setLoading(true);
+    setFirstGalleryPageFailed(false);
+    try {
+      const refreshed = await refreshActiveGalleryAssets({ silent: false, attempts: 1 });
+      if (isCurrentQuery()) {
+        if (refreshed) {
+          requestOwner.appendedOffsets.add(0);
+        }
+        setFirstGalleryPageFailed(!refreshed);
+      }
+    } finally {
+      requestOwner.pendingAppends.delete(0);
+      if (isCurrentQuery()) {
+        setLoading(false);
+      }
+    }
   }
 
   function applyFavoriteAssetUpdate(updatedAsset: MediaAsset) {

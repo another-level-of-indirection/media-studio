@@ -11,8 +11,9 @@ import { useCreativeAssistant } from "./hooks/use-creative-assistant";
 import { CreativeAssistantPanel } from "./creative-assistant-panel";
 import { assistantTestWorkflow, assistantTestSession, assistantIdleProgress } from "./creative-assistant-test-fixtures";
 import type { AssistantAttachment } from "./types";
+import { __resetGraphStartupReadsForTests } from "./utils/graph-startup-reads";
 
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.useRealTimers(); });
+afterEach(() => { cleanup(); __resetGraphStartupReadsForTests(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 const models: MediaModelSummary[] = [{
   key: "nano-banana-2", label: "Nano Banana 2", provider_model: "nano-banana-2",
   task_modes: ["text_to_image"], image_inputs: { required_min: 0, required_max: 0 },

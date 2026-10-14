@@ -1,5 +1,5 @@
 import { MediaStudio } from "@/components/media-studio";
-import { getMediaDashboardSnapshot } from "@/lib/control-api";
+import { getStudioSnapshot } from "@/lib/control-api";
 import { INITIAL_ASSET_PAGE_SIZE } from "@/lib/media-studio-contract";
 
 export default async function MediaStudioPage({
@@ -10,7 +10,7 @@ export default async function MediaStudioPage({
   const resolvedSearchParams = searchParams ? await searchParams : {};
   const selectedProjectId =
     typeof resolvedSearchParams?.project === "string" ? resolvedSearchParams.project : null;
-  const snapshot = await getMediaDashboardSnapshot({ projectId: selectedProjectId });
+  const snapshot = await getStudioSnapshot({ projectId: selectedProjectId });
   const balance = snapshot.credits.data?.balance;
   const availableCredits =
     typeof balance?.available_credits === "number"
@@ -36,6 +36,7 @@ export default async function MediaStudioPage({
       initialAssetOffset={snapshot.assets.data?.offset ?? 0}
       initialAssetsHasMore={snapshot.assets.data?.has_more ?? false}
       initialAssetsNextOffset={snapshot.assets.data?.next_offset ?? null}
+      initialAssetsNextCursor={snapshot.assets.data?.next_cursor ?? null}
       latestAsset={snapshot.latestAsset.data?.asset ?? null}
       remainingCredits={availableCredits}
       pricingSnapshot={snapshot.pricing.data?.snapshot ?? null}

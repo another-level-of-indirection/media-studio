@@ -3,7 +3,7 @@ import { SettingsSectionTabs } from "@/components/settings/settings-section-tabs
 import { StudioAdminShell } from "@/components/studio-admin-shell";
 import { StudioDebugSettings } from "@/components/studio-debug-settings";
 import { adminSectionStackClassName } from "@/components/admin-theme";
-import { getMediaDashboardSnapshot } from "@/lib/control-api";
+import { getGeneralSettingsSnapshot } from "@/lib/control-api";
 
 export default async function StudioSettingsPage({
   searchParams,
@@ -11,7 +11,7 @@ export default async function StudioSettingsPage({
   searchParams?: Promise<{ project?: string }>;
 }) {
   const resolvedSearchParams = (await searchParams) ?? {};
-  const snapshot = await getMediaDashboardSnapshot();
+  const snapshot = await getGeneralSettingsSnapshot();
   const currentProjectId = resolvedSearchParams.project ?? null;
 
   return (
@@ -27,8 +27,6 @@ export default async function StudioSettingsPage({
       </div>
       <MediaModelsConsole
         models={snapshot.models.data?.models ?? []}
-        presets={snapshot.presets.data?.presets ?? []}
-        enhancementConfigs={snapshot.enhancementConfigs.data?.configs ?? []}
         queueSettings={snapshot.queueSettings.data?.settings ?? null}
         queuePolicies={snapshot.queuePolicies.data?.policies ?? []}
         sections={{

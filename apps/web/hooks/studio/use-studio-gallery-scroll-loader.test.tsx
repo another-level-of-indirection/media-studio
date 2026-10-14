@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, render } from "@testing-library/react";
+import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useStudioGalleryScrollLoader } from "@/hooks/studio/use-studio-gallery-scroll-loader";
@@ -50,6 +50,7 @@ describe("useStudioGalleryScrollLoader", () => {
   });
 
   afterEach(() => {
+    cleanup();
     vi.useRealTimers();
     vi.unstubAllGlobals();
   });
@@ -82,6 +83,15 @@ describe("useStudioGalleryScrollLoader", () => {
     act(() => {
       vi.runOnlyPendingTimers();
     });
+
+    expect(onLoadMore).not.toHaveBeenCalled();
+  });
+
+  it("does not auto-fill from a timer after its gallery has unmounted", () => {
+    const onLoadMore = vi.fn();
+    const { unmount } = render(<ScrollLoaderHarness galleryTilesLength={18} onLoadMore={onLoadMore} />);
+    unmount();
+    act(() => { vi.runOnlyPendingTimers(); });
 
     expect(onLoadMore).not.toHaveBeenCalled();
   });

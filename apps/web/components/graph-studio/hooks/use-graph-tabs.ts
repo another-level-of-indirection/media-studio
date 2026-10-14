@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { GraphWorkspaceTab } from "../types";
+import { readGraphStartup } from "../utils/graph-startup-reads";
 import {
   applyGraphTabSnapshot,
   blankGraphWorkflowPayload,
@@ -32,9 +33,7 @@ function newTabFromSnapshot(snapshot: GraphTabSnapshot): GraphWorkspaceTab {
 
 async function graphTabStorageScope(): Promise<string> {
   try {
-    const response = await fetch("/api/control/health", { cache: "no-store" });
-    if (!response.ok) return "default";
-    const payload = (await response.json()) as { install_id?: unknown };
+    const payload = await readGraphStartup<{ install_id?: unknown }>("/api/control/health");
     const installId = typeof payload.install_id === "string" ? payload.install_id.trim() : "";
     return installId || "default";
   } catch {
@@ -207,7 +206,7 @@ export function useGraphTabs() {
       ? tabs.map((tab) => (tab.tab_id === activeTabId ? applyGraphTabSnapshot(tab, activeSnapshot) : tab))
       : tabs;
     const existing = snapshot.workflowId
-      ? tabsWithActiveSnapshot.find((tab) => tab.workflow_id === snapshot.workflowId)
+      ? tabsWithActiveSnapshot.find((tab) => tab.workflow_id === snapshot.workflowId && !tab.dirty)
       : null;
     const nextActiveTab = existing ? applyGraphTabSnapshot(existing, snapshot) : newTabFromSnapshot(snapshot);
     const result = graphTabOpenWorkflowTarget(tabs, activeTabId, nextActiveTab, activeSnapshot);

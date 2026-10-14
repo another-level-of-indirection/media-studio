@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GraphAssistantSetup } from "./graph-assistant-setup";
 import { useGraphAssistantAvailability } from "./hooks/use-graph-assistant-availability";
+import { __resetGraphStartupReadsForTests } from "./utils/graph-startup-reads";
 
 function Harness() {
   const availability = useGraphAssistantAvailability();
@@ -17,6 +18,7 @@ const healthResponse = (health: object) => ({ ok: true, json: async () => health
 
 afterEach(() => {
   cleanup();
+  __resetGraphStartupReadsForTests();
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
 });
@@ -45,7 +47,7 @@ describe("Media Assistant setup entry", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(<Harness />);
     expect(await screen.findByText(title)).toBeTruthy();
-    expect(fetchMock).toHaveBeenCalledExactlyOnceWith("/api/control/health", { cache: "no-store" });
+    expect(fetchMock).toHaveBeenCalledExactlyOnceWith("/api/control/health", { cache: "no-store", headers: {} });
     expect(screen.queryByText("Operational Assistant ready")).toBeNull();
   });
 

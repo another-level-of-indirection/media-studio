@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { MediaAsset, MediaPreset } from "@/lib/types";
@@ -35,6 +35,14 @@ afterEach(() => {
 });
 
 describe("useStudioSelection", () => {
+  it("hydrates a selected asset's preset schema to retain inspector fields", async () => {
+    const asset = { asset_id: "asset-older", preset_key: "older", payload: { preset_text_values: { unit: "Saved unit" } } } as MediaAsset;
+    const preset = { preset_id: "preset-older", key: "older", label: "Older", applies_to_models: [] } as unknown as MediaPreset;
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ ok: true, preset: { ...preset, input_schema_json: [{ key: "unit", label: "Unit", default_value: "AX-17" }], input_slots_json: [] } })));
+    const { result } = renderHook(() => useStudioSelection({ initialSelectedAssetId: "asset-older", localAssets: [asset], favoriteAssets: null, localJobs: [], presets: [preset] }));
+    await waitFor(() => expect(result.current.derived.selectedAssetPresetFields[0]?.label).toBe("Unit"));
+    expect(result.current.derived.selectedAssetPresetInputValues.unit).toBe("Saved unit");
+  });
   it("hydrates selected summary assets before reading payload-derived preset values", async () => {
     const summaryAsset = {
       asset_id: "asset_1",

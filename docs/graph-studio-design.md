@@ -183,6 +183,12 @@ Out of scope for this release boundary:
   - resolution
   - media type when useful
 
+Graph restoration reads the exact selected asset/reference IDs and output references, including older records outside the first gallery page. It does not preload recent image lists. Restoration metadata remains capped at 80 assets and 80 references, prioritizing the active graph's IDs.
+
+The Graph selector owns its first-page metadata: one 40-item page per Generated/Imported source, fresh for 30 seconds, scoped by media type, project and search query. Closing the dialog releases its image and preview DOM; reopening starts from the fresh first page. A later-page window keeps at most 80 tiles per source, discarding the earliest tiles as more pages load. The first page and window can retain at most 120 item records per source, all released when Graph unmounts. Tiles retain thumbnail sources; full previews and generation retain original sources.
+
+Successful local imports and newly observed run outputs invalidate both first pages. The next open/source read fetches current metadata; Refresh bypasses freshness immediately and Retry reloads after a failed read. Media changes made elsewhere become visible on refresh or after the 30-second freshness window. Switching query/project replaces that source's cached first page; media-type changes clear both. This cache is local to the mounted Graph selector and is not a shared application cache.
+
 ### Ports, Fields, And Wires
 
 Ports are values passed between nodes.

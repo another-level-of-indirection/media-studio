@@ -83,15 +83,26 @@ class GraphWorkflow(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
-class GraphWorkflowRecord(BaseModel):
+class GraphWorkflowSummary(BaseModel):
     workflow_id: str
     name: str
     description: Optional[str] = None
     status: str = "active"
     schema_version: int = 1
-    workflow_json: Dict[str, Any] = Field(default_factory=dict)
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+
+
+class GraphWorkflowSummaryListResponse(BaseModel):
+    items: List[GraphWorkflowSummary] = Field(default_factory=list)
+    total: int
+    limit: int
+    offset: int
+    next_offset: Optional[int] = None
+
+
+class GraphWorkflowRecord(GraphWorkflowSummary):
+    workflow_json: Dict[str, Any] = Field(default_factory=dict)
 
 
 class GraphTemplate(BaseModel):

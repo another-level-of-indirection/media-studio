@@ -12,6 +12,7 @@ import type {
   MediaModelSummary,
   MediaPreset,
 } from "@/lib/types";
+import { studioPresetSupportedModels } from "@/lib/media-studio-helpers";
 
 function model(overrides: Partial<MediaModelSummary> & Pick<MediaModelSummary, "key">): MediaModelSummary {
   return {
@@ -26,6 +27,7 @@ function model(overrides: Partial<MediaModelSummary> & Pick<MediaModelSummary, "
 
 function preset(overrides: Partial<MediaPreset> & Pick<MediaPreset, "preset_id" | "key">): MediaPreset {
   return {
+    ...overrides,
     preset_id: overrides.preset_id,
     key: overrides.key,
     label: overrides.label ?? overrides.key,
@@ -33,6 +35,12 @@ function preset(overrides: Partial<MediaPreset> & Pick<MediaPreset, "preset_id" 
 }
 
 describe("useStudioShellCatalog", () => {
+  it("keeps a required-image summary compatible before detail hydration", () => {
+    const editModel = model({ key: "gpt-image-2-image-to-image" });
+    Object.assign(editModel, { task_modes: ["image_edit"], image_inputs: { required_min: 1, required_max: 16 }, input_patterns: ["image_edit"] });
+    const summary = preset({ preset_id: "older", key: "older", applies_to_models: [editModel.key], image_input_policy: "required" });
+    expect(studioPresetSupportedModels(summary, [editModel])).toEqual([editModel.key]);
+  });
   it("merges hydrated presets and exposes only enabled Studio models", () => {
     const models = [
       model({ key: "gpt-image-2", label: "GPT Image 2" }),

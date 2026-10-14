@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GraphWorkspaceTab, GraphWorkflowPayload } from "../types";
 import { writeGraphTabSession } from "../utils/graph-tabs";
 import { useGraphTabs } from "./use-graph-tabs";
+import { __resetGraphStartupReadsForTests } from "../utils/graph-startup-reads";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -61,12 +62,27 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  __resetGraphStartupReadsForTests();
   vi.unstubAllGlobals();
   localStorageMock.clear();
   window.history.replaceState(null, "", "/");
 });
 
 describe("useGraphTabs", () => {
+  it("keeps unsaved edits when the same saved workflow is opened from the browser", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ install_id: "dirty-copy" })));
+    const { result } = renderHook(() => useGraphTabs());
+    await act(async () => { await Promise.resolve(); });
+    const originalTabId = result.current.activeTabId;
+    const editedWorkflow = { ...workflow("Unsaved edits"), workflow_id: "saved-1", nodes: [{ id: "edited", type: "prompt.text", position: { x: 10, y: 20 }, fields: { text: "Keep these edits" } }] };
+    const dirty = { workflowId: "saved-1", workflowName: "Unsaved edits", workflow: editedWorkflow, dirty: true };
+    act(() => result.current.updateActiveTab(dirty));
+    act(() => result.current.openWorkflowTab({ workflowId: "saved-1", workflowName: "Saved", workflow: workflow("Saved"), dirty: false }, dirty));
+    expect(result.current.activeTabId).not.toBe(originalTabId);
+    expect(result.current.tabs.find((item) => item.tab_id === originalTabId)).toMatchObject({ dirty: true, workflow_json: editedWorkflow });
+    expect(result.current.tabs.find((item) => item.tab_id === result.current.activeTabId)?.dirty).toBe(false);
+  });
+
   it("does not let delayed scoped storage restore overwrite a user-created tab", async () => {
     const healthResponse = deferred<Response>();
     vi.stubGlobal("fetch", vi.fn(() => healthResponse.promise));

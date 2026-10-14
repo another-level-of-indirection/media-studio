@@ -54,6 +54,7 @@ import { insertStudioPromptSnippet } from "@/lib/studio-prompt-snippets";
 import { useStudioAttachments } from "@/hooks/studio/use-studio-attachments";
 import { useStudioComposerDraftEffects } from "@/hooks/studio/use-studio-composer-draft-effects";
 import { useStudioComposerGuardEffects } from "@/hooks/studio/use-studio-composer-guard-effects";
+import { useStudioPresetDetail } from "@/hooks/studio/use-studio-shell-catalog";
 import { useStudioComposerState } from "@/hooks/studio/use-studio-composer-state";
 import { useStudioComposerSubmit } from "@/hooks/studio/use-studio-composer-submit";
 import type {
@@ -205,6 +206,7 @@ export function useStudioComposer({
     }
     draftRestoreStartedRef.current = true;
     const draft = readStudioComposerDraft();
+    initialDraftRef.current = draft;
     if (draft) {
       setSourceAssetId(draft.sourceAssetId ?? null);
       setModelKey(draft.modelKey);
@@ -236,8 +238,10 @@ export function useStudioComposer({
   ]);
 
   const currentModel = models.find((model) => model.key === modelKey) ?? null;
-  const currentPreset =
-    presets.find((preset) => preset.preset_id === selectedPresetId || preset.key === selectedPresetId) ?? null;
+  const { currentPreset, presetDetailPending, presetDetailError, setPresetDetail } = useStudioPresetDetail(presets, selectedPresetId);
+  useEffect(() => {
+    if (presetDetailError) setFormMessage({ tone: "danger", text: presetDetailError });
+  }, [presetDetailError, setFormMessage]);
   const currentPresetSelectionKey = currentPreset?.preset_id ?? currentPreset?.key ?? selectedPresetId;
   const resolvedSourceAsset = findMediaAssetById(sourceAssetId, localAssets, favoriteAssets) ?? null;
   const currentSourceAsset = resolveComposerSourceAsset(
@@ -297,7 +301,7 @@ export function useStudioComposer({
   const stagedAudioCount = audioAttachments.length;
   useStudioComposerDraftEffects({
     initialDraft: initialDraftRef.current,
-    persistenceEnabled: draftPersistenceEnabled,
+    persistenceEnabled: draftPersistenceEnabled && !presetDetailPending,
     sourceAssetId,
     modelKey,
     selectedPresetId,
@@ -382,7 +386,7 @@ export function useStudioComposer({
   const structuredPresetPromptPreview = structuredPresetActive
     ? renderStructuredPresetPrompt(currentPreset?.prompt_template ?? "", presetInputValues, presetSlotStates, structuredPresetImageSlots)
     : "";
-  const presetRequirementError = structuredPresetActive
+  const presetRequirementError = presetDetailPending ? "Preset details are still loading." : structuredPresetActive
     ? (() => {
         for (const field of structuredPresetTextFields) {
           const value = String(presetInputValues[field.key] ?? field.defaultValue ?? "").trim();
@@ -514,6 +518,7 @@ export function useStudioComposer({
   const canAddMoreAudios = maxAudioInputs > 0 && stagedAudioCount < maxAudioInputs;
 
   useStudioComposerGuardEffects({
+    presetReady: draftPersistenceEnabled && !presetDetailPending,
     models,
     enabledModels,
     studioReadyModels,
@@ -677,6 +682,11 @@ export function useStudioComposer({
     setOpenPicker(null);
   }
 
+  function selectModel(value: string) {
+    setModelKey(value);
+    setOptionValues(buildNormalizedStudioOptions(models.find((model) => model.key === value) ?? null, {}, null));
+  }
+
   function applyPresetSelection(
     value: string,
     options: {
@@ -701,6 +711,7 @@ export function useStudioComposer({
     if (!targetPreset) {
       return;
     }
+    if (targetPreset.input_schema_json) setPresetDetail(targetPreset);
 
     const nextModelKey =
       resolveStudioPresetTargetModel(targetPreset, options.preferredModelKey ?? modelKey, lastStructuredPresetModelKey, models) ?? modelKey;
@@ -713,6 +724,8 @@ export function useStudioComposer({
       ((targetPreset.input_slots_json as Array<Record<string, unknown>> | undefined)?.length ?? 0) > 0;
 
     setSelectedPresetId(targetPreset.preset_id ?? targetPreset.key);
+    setPresetInputValues(Object.fromEntries(normalizeStructuredPresetTextFields(targetPreset).map((field) => [field.key, field.defaultValue])));
+    clearPresetSlotStateValues();
 
     if (hasStructuredInputs) {
       for (const attachment of attachments) {
@@ -728,9 +741,7 @@ export function useStudioComposer({
       setPrompt(targetPreset.prompt_template);
     }
 
-    if (targetPreset.default_options_json && Object.keys(targetPreset.default_options_json).length) {
-      setOptionValues((current) => ({ ...current, ...targetPreset.default_options_json }));
-    }
+    setOptionValues(buildNormalizedStudioOptions(models.find((model) => model.key === nextModelKey) ?? null, {}, targetPreset.default_options_json));
   }
 
   function togglePrompt(promptId: string) {
@@ -857,6 +868,7 @@ export function useStudioComposer({
       openPicker,
     },
     derived: {
+      presetDetailPending,
       currentModel,
       currentPreset,
       currentSourceAsset,
@@ -929,7 +941,7 @@ export function useStudioComposer({
       stagedAudioCount,
     },
     actions: {
-      setModelKey,
+      setModelKey: selectModel,
       setSelectedPresetId,
       setSelectedPromptIds,
       setPrompt,

@@ -13,7 +13,10 @@ import {
   upsertBatchCollection,
 } from "@/lib/studio-gallery";
 import type { MediaAsset, MediaBatch, MediaJob } from "@/lib/types";
-import { createStudioGalleryPageActions } from "@/hooks/studio/use-studio-gallery-page-actions";
+import {
+  createStudioGalleryPageActions,
+  type GalleryPageRequestOwner,
+} from "@/hooks/studio/use-studio-gallery-page-actions";
 import { useStudioGalleryPageEffects } from "@/hooks/studio/use-studio-gallery-page-effects";
 import { useStudioGalleryScrollLoader } from "@/hooks/studio/use-studio-gallery-scroll-loader";
 export { isDefaultStudioGalleryQuery } from "@/lib/studio-gallery-feed";
@@ -26,6 +29,7 @@ type UseStudioGalleryFeedParams = {
   initialAssetLimit: number;
   initialAssetsHasMore: boolean;
   initialAssetsNextOffset: number | null;
+  initialAssetsNextCursor?: string | null;
   latestAsset: MediaAsset | null;
   onMessage: (message: ComposerStatusMessage) => void;
 };
@@ -39,6 +43,7 @@ type UseStudioGalleryFeedResult = {
     assetFeedHasMore: boolean;
     assetFeedNextOffset: number | null;
     loadingMoreAssets: boolean;
+    firstGalleryPageFailed: boolean;
     localLatestAsset: MediaAsset | null;
     galleryModelFilter: string;
     galleryKindFilter: GalleryKindFilter;
@@ -91,6 +96,7 @@ export function useStudioGalleryFeed({
   initialAssetLimit,
   initialAssetsHasMore,
   initialAssetsNextOffset,
+  initialAssetsNextCursor = null,
   latestAsset,
   onMessage,
 }: UseStudioGalleryFeedParams): UseStudioGalleryFeedResult {
@@ -107,6 +113,7 @@ export function useStudioGalleryFeed({
   const [assetFeedHasMore, setAssetFeedHasMore] = useState(initialAssetsHasMore);
   const [assetFeedNextOffset, setAssetFeedNextOffset] = useState<number | null>(initialAssetsNextOffset);
   const [loadingMoreAssets, setLoadingMoreAssets] = useState(false);
+  const [firstGalleryPageFailed, setFirstGalleryPageFailed] = useState(false);
   const [prefetchingAssetPage, setPrefetchingAssetPage] = useState(false);
   const [prefetchedAssetPage, setPrefetchedAssetPage] = useState<AssetPagePayload | null>(null);
   const [localLatestAsset, setLocalLatestAsset] = useState<MediaAsset | null>(latestAsset);
@@ -153,6 +160,33 @@ export function useStudioGalleryFeed({
   const initialAssetQueryScopeKeyRef = useRef(
     JSON.stringify({ projectId: activeProjectId ?? null, kind: "all", model: "all" }),
   );
+  const inFlightAssetPagesRef = useRef(new Map<string, Promise<AssetPagePayload>>());
+  const pageRequestOwner = useMemo<GalleryPageRequestOwner>(
+    () => ({
+      pendingAppends: new Set(),
+      appendedOffsets: new Set(),
+      inFlight: inFlightAssetPagesRef.current,
+      cursors: new Map(
+        !favoritesOnly && assetQueryScopeKey === initialAssetQueryScopeKeyRef.current && initialAssetsNextOffset != null && initialAssetsNextCursor
+          ? [[initialAssetsNextOffset, initialAssetsNextCursor]]
+          : [],
+      ),
+    }),
+    [assetQueryScopeKey, favoritesOnly],
+  );
+  // A fresh owner prevents earlier query visits from applying stale responses.
+  const currentPageRequestOwnerRef = useRef<GalleryPageRequestOwner | null>(pageRequestOwner);
+  currentPageRequestOwnerRef.current = pageRequestOwner;
+  useEffect(() => {
+    currentPageRequestOwnerRef.current = pageRequestOwner;
+    setLoadingMoreAssets(false);
+    setLoadingMoreFavoriteAssets(false);
+    return () => {
+      if (currentPageRequestOwnerRef.current === pageRequestOwner) {
+        currentPageRequestOwnerRef.current = null;
+      }
+    };
+  }, [pageRequestOwner]);
   const galleryTiles = useMemo(
     () =>
       buildGalleryTiles(
@@ -182,11 +216,14 @@ export function useStudioGalleryFeed({
   );
 
   const pageActions = createStudioGalleryPageActions({
+    requestOwner: pageRequestOwner,
+    isCurrentQuery: () => currentPageRequestOwnerRef.current === pageRequestOwner,
     activeProjectId,
     assetPageLimit,
     assetFeedHasMore,
     assetFeedNextOffset,
     loadingMoreAssets,
+    firstGalleryPageFailed,
     prefetchedAssetPage,
     favoritesOnly,
     favoriteAssetFeedHasMore,
@@ -207,6 +244,7 @@ export function useStudioGalleryFeed({
     setFavoriteAssetFeedNextOffset,
     setPrefetchedFavoriteAssetPage,
     setLoadingMoreFavoriteAssets,
+    setFirstGalleryPageFailed,
   });
 
   const galleryScrollLoader = useStudioGalleryScrollLoader({
@@ -303,12 +341,10 @@ export function useStudioGalleryFeed({
     assetFeedHasMore,
     assetFeedNextOffset,
     loadingMoreAssets,
-    prefetchingAssetPage,
     prefetchedAssetPage,
     favoriteAssetFeedHasMore,
     favoriteAssetFeedNextOffset,
     loadingMoreFavoriteAssets,
-    prefetchingFavoriteAssetPage,
     prefetchedFavoriteAssetPage,
     favoritesOnly,
     galleryKindFilter,
@@ -330,6 +366,7 @@ export function useStudioGalleryFeed({
     setPrefetchedFavoriteAssetPage,
     setPrefetchingAssetPage,
     setPrefetchingFavoriteAssetPage,
+    setFirstGalleryPageFailed,
   });
 
   function activateGalleryKindFilter(nextKind: GalleryKindFilter) {
@@ -356,6 +393,7 @@ export function useStudioGalleryFeed({
       assetFeedHasMore,
       assetFeedNextOffset,
       loadingMoreAssets,
+      firstGalleryPageFailed,
       localLatestAsset,
       galleryModelFilter,
       galleryKindFilter,
@@ -392,7 +430,7 @@ export function useStudioGalleryFeed({
       setFavoriteAssets,
       activateGalleryKindFilter,
       toggleFavoritesFilter,
-      loadMoreActiveGalleryAssets: async () => pageActions.loadMoreActiveGalleryAssets(),
+      loadMoreActiveGalleryAssets: pageActions.loadMoreActiveGalleryAssets,
       refreshActiveGalleryAssets: pageActions.refreshActiveGalleryAssets,
       upsertBatch: (batch) => setLocalBatches((current) => upsertBatchCollection(current, batch)),
       mergeAssetIntoCollection: pageActions.mergeAssetIntoCollection,

@@ -7652,6 +7652,20 @@
               ],
               "title": "Q"
             }
+          },
+          {
+            "in": "query",
+            "name": "cursor_mode",
+            "required": false,
+            "schema": {
+              "default": "timestamp",
+              "enum": [
+                "timestamp",
+                "asset_id"
+              ],
+              "title": "Cursor Mode",
+              "type": "string"
+            }
           }
         ],
         "responses": {

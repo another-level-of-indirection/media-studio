@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Clapperboard,
   Image as ImageIcon,
@@ -62,6 +62,33 @@ export async function fetchStudioPresetDetail(presetIdOrKey: string) {
     throw new Error(payload.error ?? "Unable to load preset details.");
   }
   return payload.preset;
+}
+
+
+export function useStudioPresetDetail(presets: MediaPreset[], selectedPresetId: string) {
+  const [loaded, setLoaded] = useState<{ key: string; preset?: MediaPreset; error?: string } | null>(null);
+  const catalogPreset = presets.find((preset) => preset.preset_id === selectedPresetId || preset.key === selectedPresetId) ?? null;
+  const detail = catalogPreset?.input_schema_json ? catalogPreset
+    : loaded?.preset && (loaded.preset.preset_id === selectedPresetId || loaded.preset.key === selectedPresetId) ? loaded.preset : null;
+  const pending = Boolean(selectedPresetId && !detail);
+
+  useEffect(() => {
+    if (!pending) return;
+    let active = true;
+    void fetchStudioPresetDetail(catalogPreset?.preset_id ?? selectedPresetId)
+      .then((preset) => { if (active) setLoaded({ key: selectedPresetId, preset }); })
+      .catch((error: unknown) => {
+        if (active) setLoaded({ key: selectedPresetId, error: error instanceof Error ? error.message : "Unable to load preset details." });
+      });
+    return () => { active = false; };
+  }, [pending, selectedPresetId, catalogPreset?.preset_id]);
+
+  return {
+    currentPreset: detail ?? catalogPreset,
+    presetDetailPending: pending,
+    presetDetailError: loaded?.key === selectedPresetId ? loaded.error : null,
+    setPresetDetail: (preset: MediaPreset) => setLoaded({ key: preset.preset_id, preset }),
+  };
 }
 
 type StudioShellCatalogParams = {
