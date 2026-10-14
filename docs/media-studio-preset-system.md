@@ -184,6 +184,8 @@ Studio startup uses `GET /media/presets/summary` for the complete non-archived c
 
 Studio uses its own dashboard loader, retaining health, credits, pricing, model, enhancement, queue, project and gallery data while omitting unrelated usage/recipe/assistant configuration reads. Settings and Jobs continue to use the shared loader. Preset detail hydration suspends draft persistence and preset-dependent resets until the exact schema arrives; saved user values take precedence over field/model defaults. Explicit model and new preset selections still initialize their defaults. Failed restore hydration leaves the composer draft intact.
 
+Studio gallery pages use opaque `next_cursor` continuations from `/api/control/media-assets`. The initial server snapshot seeds the first continuation; the gallery request owner includes it and the query scope in shared page requests. A first-page request opts in with `pagination=cursor`; a continuation uses `cursor` and makes one page-sized backend read. Cursors bind the project, media kind, model, favorites, status, preset, search and response view. Scope changes start at the first page. Malformed or mismatched web continuations return HTTP 400 with a reload instruction; backend failures, including an unavailable asset anchor, retain the proxy’s existing HTTP 502 behavior and error text. Offset-only requests remain available for other consumers. The backend opt-in `cursor_mode=asset_id` resolves the last asset and continues by timestamp and SQLite rowid, retaining the existing order within timestamp ties. Legacy timestamp cursors remain unchanged. A removed anchor produces an explicit reload error.
+
 Backend FastAPI routes:
 
 - `GET /media/presets`

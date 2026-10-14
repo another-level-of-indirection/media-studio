@@ -1421,6 +1421,7 @@ export type MediaAssetsResponse = {
   offset?: number;
   has_more?: boolean;
   next_offset?: number | null;
+  next_cursor?: string | null;
 };
 
 export type MediaAssetPickerResponse = {
@@ -1430,6 +1431,7 @@ export type MediaAssetPickerResponse = {
   offset?: number;
   has_more?: boolean;
   next_offset?: number | null;
+  next_cursor?: string | null;
 };
 
 export type MediaAssetSummaryResponse = {
@@ -1439,6 +1441,7 @@ export type MediaAssetSummaryResponse = {
   offset?: number;
   has_more?: boolean;
   next_offset?: number | null;
+  next_cursor?: string | null;
 };
 
 export type MediaAssetResponse = {

@@ -170,6 +170,7 @@ export function MediaStudio({
   initialAssetOffset = 0,
   initialAssetsHasMore = false,
   initialAssetsNextOffset = null,
+  initialAssetsNextCursor = null,
   latestAsset,
   remainingCredits,
   pricingSnapshot,
@@ -312,6 +313,7 @@ export function MediaStudio({
     initialAssetLimit,
     initialAssetsHasMore,
     initialAssetsNextOffset,
+    initialAssetsNextCursor,
     latestAsset,
     onMessage: setFormMessage,
   });

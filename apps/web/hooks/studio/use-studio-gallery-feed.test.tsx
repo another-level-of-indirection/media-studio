@@ -79,6 +79,55 @@ function FeedHarness({ activeProjectId = null, assets = initialAssets, hasMore =
 }
 
 describe("useStudioGalleryFeed", () => {
+  it("continues the server seed and subsequent pages with opaque cursors", async () => {
+    const fetchPage = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true, assets: [projectAsset], offset: 18, has_more: true, next_offset: 30, next_cursor: "after-30" }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true, assets: [], offset: 30, has_more: false, next_offset: null, next_cursor: null }) });
+    vi.stubGlobal("fetch", fetchPage);
+    const { result } = renderHook(() => useStudioGalleryFeed({ ...paginatedFeedOptions, initialAssetsNextCursor: "after-18" }));
+    await act(async () => {
+      await Promise.all([result.current.actions.loadMoreActiveGalleryAssets(), result.current.actions.loadMoreActiveGalleryAssets()]);
+    });
+    await act(async () => { await result.current.actions.loadMoreActiveGalleryAssets(); });
+    expect(fetchPage.mock.calls.map(call => call[0])).toEqual([
+      "/api/control/media-assets?limit=12&offset=18&view=summary&pagination=cursor&cursor=after-18",
+      "/api/control/media-assets?limit=12&offset=30&view=summary&pagination=cursor&cursor=after-30",
+    ]);
+    expect(result.current.state.assetFeedHasMore).toBe(false);
+  });
+
+  it.each(["kind", "model", "favorites", "project"] as const)("resets continuation on a %s scope change", async (scope) => {
+    const fetchPage = vi.fn(async () => ({ ok: true, json: async () => ({
+      ok: true, assets: [projectAsset], offset: 0, has_more: true, next_offset: 18, next_cursor: "new-scope-18",
+    }) }));
+    vi.stubGlobal("fetch", fetchPage);
+    const { result, rerender } = renderHook(({ projectId }) => useStudioGalleryFeed({
+      ...paginatedFeedOptions, activeProjectId: projectId, initialAssetsNextCursor: "old-scope-18",
+    }), { initialProps: { projectId: null as string | null } });
+    await act(async () => {
+      if (scope === "kind") result.current.actions.setGalleryKindFilter("image");
+      if (scope === "model") result.current.actions.setGalleryModelFilter("model-2");
+      if (scope === "favorites") result.current.actions.toggleFavoritesFilter();
+      if (scope === "project") rerender({ projectId: "project-2" });
+    });
+    expect(fetchPage.mock.calls[0][0]).toContain("offset=0&view=summary&pagination=cursor");
+    expect(fetchPage.mock.calls[0][0]).not.toContain("cursor=old-scope-18");
+    await act(async () => { await result.current.actions.loadMoreActiveGalleryAssets(); });
+    expect(fetchPage.mock.calls[1][0]).toContain("cursor=new-scope-18");
+    expect(fetchPage.mock.calls[1][0]).not.toContain("cursor=old-scope-18");
+  });
+
+  it("shows invalid continuation errors without replacing the loaded cards", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, json: async () => ({
+      ok: false, error: "Invalid gallery continuation. Reload the gallery to restart.",
+    }) })));
+    const { result } = renderHook(() => useStudioGalleryFeed({ ...paginatedFeedOptions, initialAssetsNextCursor: "invalid" }));
+    await act(async () => { await result.current.actions.loadMoreActiveGalleryAssets(); });
+    expect(handleMessage).toHaveBeenCalledWith({ tone: "danger", text: "Invalid gallery continuation. Reload the gallery to restart." });
+    expect(result.current.state.localAssets).toEqual(initialAssets);
+    expect(result.current.state.loadingMoreAssets).toBe(false);
+  });
+
   beforeEach(() => {
     handleMessage.mockClear();
     vi.stubGlobal(
@@ -120,7 +169,7 @@ describe("useStudioGalleryFeed", () => {
 
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch).toHaveBeenCalledWith(
-      "/api/control/media-assets?limit=18&offset=0&view=summary&project_id=project-1",
+      "/api/control/media-assets?limit=18&offset=0&view=summary&pagination=cursor&project_id=project-1",
       {
         method: "GET",
         headers: { Accept: "application/json" },
@@ -381,7 +430,7 @@ describe("useStudioGalleryFeed", () => {
 
     await act(async () => { result.current.actions.toggleFavoritesFilter(); });
     expect(fetchPage).toHaveBeenCalledTimes(3);
-    expect(fetchPage.mock.calls[2][0]).toBe("/api/control/media-assets?limit=18&offset=0&view=summary");
+    expect(fetchPage.mock.calls[2][0]).toBe("/api/control/media-assets?limit=18&offset=0&view=summary&pagination=cursor");
   });
 
   it("ignores a stale deliberate refresh while allowing fresh refresh reads", async () => {

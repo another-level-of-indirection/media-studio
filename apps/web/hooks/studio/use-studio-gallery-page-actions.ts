@@ -18,6 +18,7 @@ export type GalleryPageRequestOwner = {
   pendingAppends: Set<number>;
   appendedOffsets: Set<number>;
   inFlight: Map<string, Promise<AssetPagePayload>>;
+  cursors: Map<number, string>;
 };
 
 type GalleryPageActionParams = {
@@ -55,6 +56,7 @@ type GalleryPageActionParams = {
 export function buildStudioGalleryAssetPageParams({
   activeProjectId,
   offset,
+  cursor,
   favorited,
   limit,
   galleryKindFilter,
@@ -62,6 +64,7 @@ export function buildStudioGalleryAssetPageParams({
 }: {
   activeProjectId: string | null;
   offset: number;
+  cursor?: string;
   favorited?: boolean;
   limit: number;
   galleryKindFilter: GalleryKindFilter;
@@ -72,6 +75,12 @@ export function buildStudioGalleryAssetPageParams({
     offset: String(Math.max(0, offset)),
     view: "summary",
   });
+  if (offset <= 0 || cursor) {
+    params.set("pagination", "cursor");
+  }
+  if (cursor) {
+    params.set("cursor", cursor);
+  }
   if (favorited) {
     params.set("favorited", "true");
   }
@@ -135,6 +144,7 @@ export function createStudioGalleryPageActions({
     const params = buildStudioGalleryAssetPageParams({
       activeProjectId,
       offset,
+      cursor: offset > 0 ? requestOwner.cursors.get(offset) : undefined,
       favorited,
       limit: limitOverride ?? assetPageLimit,
       galleryKindFilter,
@@ -162,7 +172,16 @@ export function createStudioGalleryPageActions({
     }
     try {
       const payload = await request;
-      return isCurrentQuery() ? payload : null;
+      if (!isCurrentQuery()) {
+        return null;
+      }
+      if (offset === 0) {
+        requestOwner.cursors.clear();
+      }
+      if (payload.next_offset != null && payload.next_cursor) {
+        requestOwner.cursors.set(payload.next_offset, payload.next_cursor);
+      }
+      return payload;
     } catch (error) {
       if (!silent && isCurrentQuery()) {
         onMessage({
@@ -184,6 +203,7 @@ export function createStudioGalleryPageActions({
         return false;
       }
       requestOwner.appendedOffsets.add(offset);
+      requestOwner.cursors.delete(offset);
     }
     return true;
   }

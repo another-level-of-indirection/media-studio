@@ -36,6 +36,7 @@ export default async function MediaStudioPage({
       initialAssetOffset={snapshot.assets.data?.offset ?? 0}
       initialAssetsHasMore={snapshot.assets.data?.has_more ?? false}
       initialAssetsNextOffset={snapshot.assets.data?.next_offset ?? null}
+      initialAssetsNextCursor={snapshot.assets.data?.next_cursor ?? null}
       latestAsset={snapshot.latestAsset.data?.asset ?? null}
       remainingCredits={availableCredits}
       pricingSnapshot={snapshot.pricing.data?.snapshot ?? null}

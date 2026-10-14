@@ -29,6 +29,7 @@ type UseStudioGalleryFeedParams = {
   initialAssetLimit: number;
   initialAssetsHasMore: boolean;
   initialAssetsNextOffset: number | null;
+  initialAssetsNextCursor?: string | null;
   latestAsset: MediaAsset | null;
   onMessage: (message: ComposerStatusMessage) => void;
 };
@@ -95,6 +96,7 @@ export function useStudioGalleryFeed({
   initialAssetLimit,
   initialAssetsHasMore,
   initialAssetsNextOffset,
+  initialAssetsNextCursor = null,
   latestAsset,
   onMessage,
 }: UseStudioGalleryFeedParams): UseStudioGalleryFeedResult {
@@ -160,7 +162,16 @@ export function useStudioGalleryFeed({
   );
   const inFlightAssetPagesRef = useRef(new Map<string, Promise<AssetPagePayload>>());
   const pageRequestOwner = useMemo<GalleryPageRequestOwner>(
-    () => ({ pendingAppends: new Set(), appendedOffsets: new Set(), inFlight: inFlightAssetPagesRef.current }),
+    () => ({
+      pendingAppends: new Set(),
+      appendedOffsets: new Set(),
+      inFlight: inFlightAssetPagesRef.current,
+      cursors: new Map(
+        !favoritesOnly && assetQueryScopeKey === initialAssetQueryScopeKeyRef.current && initialAssetsNextOffset != null && initialAssetsNextCursor
+          ? [[initialAssetsNextOffset, initialAssetsNextCursor]]
+          : [],
+      ),
+    }),
     [assetQueryScopeKey, favoritesOnly],
   );
   // A fresh owner prevents earlier query visits from applying stale responses.

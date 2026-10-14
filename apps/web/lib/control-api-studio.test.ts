@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 import { getMediaDashboardSnapshot, getStudioSnapshot } from "@/lib/control-api";
+import { decodeStudioGalleryCursor } from "@/lib/studio-gallery-cursor";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -31,7 +32,7 @@ describe("Studio initial snapshot", () => {
       "/health", "/media/credits", "/media/pricing", "/media/models", "/media/presets/summary",
       "/media/system-prompts", "/media/enhancement-configs", "/media/queue/settings", "/media/queue/policies",
       "/media/projects?status=all", "/media/batches?limit=8&offset=0&project_id=project%20A",
-      "/media/jobs?limit=8&project_id=project%20A", "/media/assets?limit=18&compact=true&project_id=project%20A",
+      "/media/jobs?limit=8&project_id=project%20A", "/media/assets?limit=18&compact=true&cursor_mode=asset_id&project_id=project%20A",
       "/media/assets/latest?project_id=project%20A",
     ].sort());
     expect(snapshot.credits.data.balance.available_credits).toBe(17);
@@ -40,6 +41,11 @@ describe("Studio initial snapshot", () => {
     expect(snapshot.presets.data.presets[0]).not.toHaveProperty("input_schema_json");
     expect(snapshot.assets.data).toMatchObject({ limit: 18, offset: 0, has_more: true, next_offset: 1 });
     expect(snapshot.assets.data.assets[0].project_id).toBe("project A");
+    expect(decodeStudioGalleryCursor(
+      snapshot.assets.data.next_cursor!,
+      new URLSearchParams({ compact: "true", cursor_mode: "asset_id", project_id: "project A" }),
+      "summary",
+    )).toEqual({ cursor: "next", offset: 1 });
   });
 
   it("preserves the shared dashboard loader and full preset contract", async () => {

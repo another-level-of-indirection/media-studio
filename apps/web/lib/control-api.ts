@@ -1,5 +1,7 @@
 import "server-only";
 
+import { encodeStudioGalleryCursor } from "@/lib/studio-gallery-cursor";
+
 import type {
   ControlApiStatus,
   ControlApiHealthData,
@@ -808,7 +810,7 @@ async function loadMediaDashboardSnapshot(options: MediaDashboardOptions | undef
       fetchControlApiJson<ControlApiRawRecord>("/media/projects?status=all"),
       fetchControlApiJson<ControlApiRawRecord>(`/media/batches?limit=${batchesLimit}&offset=${batchesOffset}${projectParams}`),
       fetchControlApiJson<ControlApiRawRecord>(`/media/jobs?limit=8${projectParams}`),
-      fetchControlApiJson<ControlApiRawRecord>(`/media/assets?limit=${INITIAL_ASSET_PAGE_SIZE}&compact=true${projectParams}`),
+      fetchControlApiJson<ControlApiRawRecord>(`/media/assets?limit=${INITIAL_ASSET_PAGE_SIZE}&compact=true&cursor_mode=asset_id${projectParams}`),
       fetchControlApiJson<ControlApiRawRecord>(`/media/assets/latest${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ""}`),
     ]);
 
@@ -916,6 +918,12 @@ async function loadMediaDashboardSnapshot(options: MediaDashboardOptions | undef
         offset: 0,
         has_more: Boolean(assetsRaw.data?.next_cursor),
         next_offset: assets.length > 0 && assetsRaw.data?.next_cursor ? assets.length : null,
+        next_cursor: encodeStudioGalleryCursor(
+          assetsRaw.data?.next_cursor as string | null | undefined,
+          assets.length,
+          new URLSearchParams({ compact: "true", cursor_mode: "asset_id", ...(projectId ? { project_id: projectId } : {}) }),
+          "summary",
+        ),
       } as MediaAssetsResponse,
     },
     latestAsset: {

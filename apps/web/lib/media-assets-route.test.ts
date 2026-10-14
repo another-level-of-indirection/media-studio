@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { encodeStudioGalleryCursor } from "@/lib/studio-gallery-cursor";
 
 const getControlApiJson = vi.fn();
 const sendControlApiJson = vi.fn();
@@ -118,6 +119,99 @@ describe("control media-assets route", () => {
   beforeEach(() => {
     getControlApiJson.mockReset();
     sendControlApiJson.mockReset();
+  });
+
+  it("starts cursor browsing with one page-sized backend read", async () => {
+    getControlApiJson.mockResolvedValue({ ok: true, data: {
+      items: Array.from({ length: 12 }, (_, i) => buildAsset(i)), next_cursor: "backend-12",
+    } });
+    const { GET } = await import("@/app/api/control/media-assets/route");
+    const response = await GET(new Request("http://localhost/api/control/media-assets?pagination=cursor&limit=12&view=summary"));
+    const page = await response.json();
+    expect(getControlApiJson.mock.calls).toEqual([["/media/assets?compact=true&cursor_mode=asset_id&limit=12", "read"]]);
+    expect(page).toMatchObject({ offset: 0, next_offset: 12, has_more: true });
+    expect(page.next_cursor).toEqual(expect.any(String));
+    expect(page.next_cursor).not.toBe("backend-12");
+  });
+
+  it.each([100, 500])("continues offset %s with one bounded read and no prefix scan", async (offset) => {
+    const cursor = encodeStudioGalleryCursor("backend-anchor", offset, new URLSearchParams({ compact: "true", cursor_mode: "asset_id" }), "summary");
+    getControlApiJson.mockResolvedValue({ ok: true, data: {
+      items: Array.from({ length: 12 }, (_, i) => buildAsset(offset + i)), next_cursor: "next-anchor",
+    } });
+    const { GET } = await import("@/app/api/control/media-assets/route");
+    const response = await GET(new Request(`http://localhost/api/control/media-assets?limit=12&view=summary&cursor=${cursor}`));
+    const page = await response.json();
+    expect(getControlApiJson.mock.calls).toEqual([["/media/assets?compact=true&cursor_mode=asset_id&limit=12&cursor=backend-anchor", "read"]]);
+    expect(page).toMatchObject({ offset, next_offset: offset + 12 });
+    expect(page.assets.map((asset: { asset_id: string }) => asset.asset_id)).toEqual(Array.from({ length: 12 }, (_, i) => `asset-${offset + i}`));
+  });
+
+  it.each([
+    "generation_kind=image", "model_key=other", "status=failed", "preset_key=other",
+    "project_id=other", "favorited=true", "q=other", "view=picker",
+  ])("rejects a continuation used with a changed query: %s", async (filter) => {
+    const cursor = encodeStudioGalleryCursor("anchor", 12, new URLSearchParams({ compact: "true", cursor_mode: "asset_id" }), "summary");
+    const { GET } = await import("@/app/api/control/media-assets/route");
+    const params = new URLSearchParams({ limit: "12", view: "summary", cursor: cursor! });
+    new URLSearchParams(filter).forEach((value, key) => params.set(key, value));
+    const response = await GET(new Request(`http://localhost/api/control/media-assets?${params}`));
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toContain("Reload the gallery");
+    expect(getControlApiJson).not.toHaveBeenCalled();
+  });
+
+  it.each(["", "broken", Buffer.from(JSON.stringify({ version: 99 })).toString("base64url")])("rejects invalid continuation %s before backend access", async (cursor) => {
+    const { GET } = await import("@/app/api/control/media-assets/route");
+    const response = await GET(new Request(`http://localhost/api/control/media-assets?view=summary&cursor=${cursor}`));
+    expect(response.status).toBe(400);
+    expect(getControlApiJson).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unanchored cursor-mode deep offset instead of rescanning", async () => {
+    const { GET } = await import("@/app/api/control/media-assets/route");
+    const response = await GET(new Request("http://localhost/api/control/media-assets?pagination=cursor&offset=500"));
+    expect(response.status).toBe(400);
+    expect(getControlApiJson).not.toHaveBeenCalled();
+  });
+
+  it("rejects mismatched offset metadata on a continuation", async () => {
+    const cursor = encodeStudioGalleryCursor("anchor", 500, new URLSearchParams({ cursor_mode: "asset_id" }), null);
+    const { GET } = await import("@/app/api/control/media-assets/route");
+    const response = await GET(new Request(`http://localhost/api/control/media-assets?offset=100&cursor=${cursor}`));
+    expect(response.status).toBe(400);
+    expect(getControlApiJson).not.toHaveBeenCalled();
+  });
+
+  it("reports terminal empty pages and upstream failures explicitly in cursor mode", async () => {
+    const { GET } = await import("@/app/api/control/media-assets/route");
+    getControlApiJson.mockResolvedValueOnce({ ok: true, data: { items: [], next_cursor: null } });
+    const response = await GET(new Request("http://localhost/api/control/media-assets?pagination=cursor"));
+    expect(await response.json()).toMatchObject({ assets: [], has_more: false, next_offset: null, next_cursor: null });
+    getControlApiJson.mockResolvedValueOnce({ ok: false, error: "Backend unavailable" });
+    const failed = await GET(new Request("http://localhost/api/control/media-assets?pagination=cursor"));
+    expect(failed.status).toBe(502);
+    expect((await failed.json()).error).toBe("Backend unavailable");
+  });
+
+  it("does not shift or duplicate the continuation when a newer asset is inserted", async () => {
+    const records = Array.from({ length: 30 }, (_, i) => ({ ...buildAsset(i), created_at: String(100 - i) }));
+    getControlApiJson.mockImplementation(async (endpoint: string) => {
+      const params = new URL(endpoint, "http://backend").searchParams;
+      const limit = Number(params.get("limit"));
+      const anchor = params.get("cursor");
+      const remaining = anchor ? records.slice(records.findIndex(asset => asset.asset_id === anchor) + 1) : records;
+      const items = remaining.slice(0, limit);
+      return { ok: true, data: { items, next_cursor: remaining.length > limit ? items.at(-1)!.asset_id : null } };
+    });
+    const { GET } = await import("@/app/api/control/media-assets/route");
+    const first = await (await GET(new Request("http://localhost/api/control/media-assets?pagination=cursor&limit=12"))).json();
+    records.unshift({ ...buildAsset(99), created_at: "101" });
+    const second = await (await GET(new Request(`http://localhost/api/control/media-assets?limit=12&cursor=${first.next_cursor}`))).json();
+    const ids = [...first.assets, ...second.assets].map(asset => asset.asset_id);
+    expect(ids).toEqual(Array.from({ length: 24 }, (_, i) => `asset-${i}`));
+    expect(new Set(ids).size).toBe(24);
+    expect(getControlApiJson).toHaveBeenCalledTimes(2);
   });
 
   it("uses backend cursor pagination for high offsets without exceeding the API limit", async () => {

@@ -573,12 +573,24 @@ def list_assets(
     project_id: Optional[str] = None,
     compact: bool = False,
     q: Optional[str] = None,
+    cursor_mode: str = "timestamp",
 ) -> List[Dict[str, Any]]:
     clauses = ["dismissed = 0", "hidden_from_dashboard = 0"]
     params: List[Any] = []
     if cursor:
-        clauses.append("created_at < ?")
-        params.append(cursor)
+        if cursor_mode == "asset_id":
+            with get_connection() as connection:
+                anchor = connection.execute(
+                    "SELECT created_at, rowid FROM media_assets WHERE asset_id = ?",
+                    (cursor,),
+                ).fetchone()
+            if not anchor:
+                raise ValueError("Invalid gallery continuation. Reload the gallery to restart.")
+            clauses.append("(created_at < ? OR (created_at = ? AND rowid > ?))")
+            params.extend([anchor["created_at"], anchor["created_at"], anchor["rowid"]])
+        else:
+            clauses.append("created_at < ?")
+            params.append(cursor)
     if favorites_only:
         clauses.append("favorited = 1")
     if media_type == "image":
@@ -627,7 +639,9 @@ def list_assets(
         if compact
         else "*"
     )
-    query = "SELECT %s FROM media_assets WHERE %s ORDER BY created_at DESC LIMIT ?" % (columns, " AND ".join(clauses))
+    # SQLite's existing timestamp sort retains rowid order inside ties.
+    order = "created_at DESC, rowid ASC" if cursor_mode == "asset_id" else "created_at DESC"
+    query = "SELECT %s FROM media_assets WHERE %s ORDER BY %s LIMIT ?" % (columns, " AND ".join(clauses), order)
     params.append(limit)
     with get_connection() as connection:
         rows = connection.execute(query, params).fetchall()

@@ -6,7 +6,7 @@ from hashlib import sha256
 import logging
 from pathlib import Path
 import tempfile
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
@@ -1025,23 +1025,30 @@ def list_assets(
     project_id: Optional[str] = Query(default=None),
     compact: bool = False,
     q: Optional[str] = Query(default=None),
+    cursor_mode: Literal["timestamp", "asset_id"] = "timestamp",
 ):
-    rows = store.list_assets(
-        limit=limit + 1,
-        cursor=cursor,
-        favorites_only=favorites,
-        media_type=media_type,
-        model_key=model_key,
-        status=status,
-        preset_key=preset_key,
-        project_id=project_id,
-        compact=compact,
-        q=q,
-    )
+    try:
+        rows = store.list_assets(
+            limit=limit + 1,
+            cursor=cursor,
+            favorites_only=favorites,
+            media_type=media_type,
+            model_key=model_key,
+            status=status,
+            preset_key=preset_key,
+            project_id=project_id,
+            compact=compact,
+            q=q,
+            cursor_mode=cursor_mode,
+        )
+    except ValueError as exc:
+        raise _bad_request(str(exc)) from exc
     has_more = len(rows) > limit
     rows = rows[:limit]
     items = [AssetRecord(**item) for item in rows]
-    next_cursor = items[-1].created_at if has_more and items else None
+    next_cursor = (
+        items[-1].asset_id if cursor_mode == "asset_id" else items[-1].created_at
+    ) if has_more and items else None
     return AssetListResponse(items=items, next_cursor=next_cursor)
 
 
