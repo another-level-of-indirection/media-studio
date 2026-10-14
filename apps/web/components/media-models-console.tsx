@@ -35,10 +35,10 @@ import { cn } from "@/lib/utils";
 
 type MediaModelsConsoleProps = {
   models: MediaModelSummary[];
-  presets: MediaPreset[];
+  presets?: MediaPreset[];
   presetsTotal?: number;
   presetsNextOffset?: number | null;
-  enhancementConfigs: MediaEnhancementConfig[];
+  enhancementConfigs?: MediaEnhancementConfig[];
   queueSettings?: MediaQueueSettings | null;
   queuePolicies?: MediaModelQueuePolicy[];
   initialSelectedModelKey?: string;
@@ -74,13 +74,15 @@ function isMobileControlDevice() {
 
 const MEDIA_OUTPUTS_PATH = process.env.NEXT_PUBLIC_MEDIA_STUDIO_OUTPUTS_PATH || "data/outputs";
 const GLOBAL_ENHANCEMENT_CONFIG_KEY = "__studio_enhancement__";
+const EMPTY_PRESETS: MediaPreset[] = [];
+const EMPTY_ENHANCEMENT_CONFIGS: MediaEnhancementConfig[] = [];
 
 export function MediaModelsConsole({
   models,
-  presets,
+  presets = EMPTY_PRESETS,
   presetsTotal,
   presetsNextOffset,
-  enhancementConfigs,
+  enhancementConfigs = EMPTY_ENHANCEMENT_CONFIGS,
   queueSettings,
   queuePolicies = [],
   initialSelectedModelKey,

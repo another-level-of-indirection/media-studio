@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MediaModelsConsole } from "@/components/media-models-console";
@@ -159,5 +159,42 @@ describe("MediaModelsConsole", () => {
     expect(screen.getAllByText("System Prompt").length).toBeGreaterThan(0);
     expect(screen.getByText("Structured Presets")).toBeTruthy();
     expect(screen.getByText("Prompt placeholder rules")).toBeTruthy();
+  });
+
+  it("preserves queue saves and availability toggles without hidden catalogs", async () => {
+    const queueSettings: MediaQueueSettings = {
+      max_concurrent_jobs: 15, queue_enabled: true, default_poll_seconds: 6, max_retry_attempts: 3,
+      max_concurrent_jobs_min: 1, max_concurrent_jobs_max: 20,
+      default_poll_seconds_min: 1, default_poll_seconds_max: 60,
+      max_retry_attempts_min: 1, max_retry_attempts_max: 10,
+      created_at: null, updated_at: null,
+    };
+    const fetchMock = vi.fn(async (url: string, options: RequestInit) => Response.json({
+      ok: true,
+      ...(url.includes("queue-settings") ? { settings: JSON.parse(String(options.body)) } : {
+        policy: { model_key: "nano-banana-2", enabled: true, max_outputs_per_run: 4 },
+      }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<MediaModelsConsole
+      models={[makeModel()]} queueSettings={queueSettings}
+      queuePolicies={[{ model_key: "nano-banana-2", enabled: false, max_outputs_per_run: 4, created_at: null, updated_at: null }]}
+      sections={{ queue: true, enhancementProvider: false, modelHelper: false, studioSettings: true, modelPanel: false, presets: false }}
+    />);
+    expect(screen.queryByText("Structured Presets")).toBeNull();
+    fireEvent.click(screen.getByText("Job Runner").closest("summary")!);
+    fireEvent.click(screen.getByText("Model Availability", { selector: "h3" }).closest("summary")!);
+    expect(screen.getByDisplayValue("15").getAttribute("max")).toBe("20");
+    expect(screen.getByDisplayValue("6").getAttribute("max")).toBe("60");
+    expect(screen.getByDisplayValue("3").getAttribute("max")).toBe("10");
+    expect(screen.getByDisplayValue("data/outputs").hasAttribute("readonly")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.getAllByText("Queue settings saved.").length).toBeGreaterThan(0));
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/control/media-queue-settings");
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1].body))).toMatchObject({ max_concurrent_jobs: 15, queue_enabled: true, default_poll_seconds: 6, max_retry_attempts: 3 });
+    fireEvent.click(screen.getByRole("switch", { name: "Enable Nano Banana 2" }));
+    await waitFor(() => expect(screen.getByRole("switch", { name: "Disable Nano Banana 2" })).toBeTruthy());
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/control/media-queue-policies/nano-banana-2");
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1].body))).toEqual({ enabled: true, max_outputs_per_run: 4 });
   });
 });

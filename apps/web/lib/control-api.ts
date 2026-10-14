@@ -764,6 +764,19 @@ export function getMediaDashboardSnapshot(options?: MediaDashboardOptions) {
   return loadMediaDashboardSnapshot(options, false);
 }
 
+export async function getGeneralSettingsSnapshot() {
+  const [modelsRaw, queueSettings, queuePoliciesRaw] = await Promise.all([
+    fetchControlApiJson<ControlApiRawList>("/media/models"),
+    getMediaQueueSettings(),
+    fetchControlApiJson<ControlApiRawList>("/media/queue/policies"),
+  ]);
+  return {
+    models: { ok: modelsRaw.ok, data: { models: (modelsRaw.data ?? []).map(mapModelRecord) } as MediaModelsResponse },
+    queueSettings,
+    queuePolicies: { ok: queuePoliciesRaw.ok, data: { policies: (queuePoliciesRaw.data ?? []).map(mapQueuePolicyRecord) } as MediaQueuePoliciesResponse },
+  };
+}
+
 export function getStudioSnapshot(options?: { projectId?: string | null }) {
   return loadMediaDashboardSnapshot(options, true);
 }
