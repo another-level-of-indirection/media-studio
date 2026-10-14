@@ -94,7 +94,8 @@ export function MediaModelsConsole({
   const router = useRouter();
   const [selectedModelKey, setSelectedModelKey] = useState(initialSelectedModelKey ?? models[0]?.key ?? "nano-banana-2");
   const [selectedEnhancementModelKey, setSelectedEnhancementModelKey] = useState(models[0]?.key ?? "nano-banana-2");
-  const [localPresets, setLocalPresets] = useState<MediaPreset[]>(presets);
+  const [importedPresets, setImportedPresets] = useState<{ source: MediaPreset[]; items: MediaPreset[] } | null>(null);
+  const localPresets = importedPresets?.source === presets ? importedPresets.items : presets;
   const [localEnhancementConfigs, setLocalEnhancementConfigs] = useState<MediaEnhancementConfig[]>(enhancementConfigs);
   const [enhancementProfileForm, setEnhancementProfileForm] = useState<EnhancementProfileFormState>(
     emptyEnhancementProfileForm(models[0]?.key ?? "nano-banana-2"),
@@ -106,7 +107,6 @@ export function MediaModelsConsole({
   const [localQueuePolicies, setLocalQueuePolicies] = useState<MediaModelQueuePolicy[]>(queuePolicies);
   const { notice: message, showNotice, clearNotice } = useAdminActionNotice();
   const presetImportInputRef = useRef<HTMLInputElement | null>(null);
-  const presetsSignature = useMemo(() => JSON.stringify(presets), [presets]);
   const enhancementConfigsSignature = useMemo(() => JSON.stringify(enhancementConfigs), [enhancementConfigs]);
   const queueSettingsSignature = useMemo(() => JSON.stringify(queueSettings ?? null), [queueSettings]);
   const queuePoliciesSignature = useMemo(() => JSON.stringify(queuePolicies), [queuePolicies]);
@@ -155,10 +155,6 @@ export function MediaModelsConsole({
   useEffect(() => {
     setSelectedEnhancementModelKey(selectedModelKey);
   }, [selectedModelKey]);
-
-  useEffect(() => {
-    setLocalPresets((current) => (JSON.stringify(current) === presetsSignature ? current : presets));
-  }, [presets, presetsSignature]);
 
   useEffect(() => {
     setLocalEnhancementConfigs((current) => (JSON.stringify(current) === enhancementConfigsSignature ? current : enhancementConfigs));
@@ -217,9 +213,10 @@ export function MediaModelsConsole({
       await invalidateGraphNodeDefinitions("media-preset-imported");
       if (result.preset) {
         const importedPreset = result.preset;
-        setLocalPresets((current) => {
-          const next = current.filter((preset) => preset.preset_id !== importedPreset.preset_id);
-          return [importedPreset, ...next];
+        setImportedPresets((current) => {
+          const items = current?.source === presets ? current.items : presets;
+          const next = items.filter((preset) => preset.preset_id !== importedPreset.preset_id);
+          return { source: presets, items: [importedPreset, ...next] };
         });
       }
       showNotice("healthy", result.message ?? "Preset imported.");

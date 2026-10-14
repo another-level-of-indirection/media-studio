@@ -11,6 +11,8 @@ import type {
   MediaQueueSettings,
 } from "@/lib/types";
 
+vi.mock("@/lib/graph-node-definitions-sync", () => ({ invalidateGraphNodeDefinitions: vi.fn(async () => undefined) }));
+
 const refreshMock = vi.fn();
 const pushMock = vi.fn();
 
@@ -197,4 +199,47 @@ describe("MediaModelsConsole", () => {
     expect(fetchMock.mock.calls[1][0]).toBe("/api/control/media-queue-policies/nano-banana-2");
     expect(JSON.parse(String(fetchMock.mock.calls[1][1].body))).toEqual({ enabled: true, max_outputs_per_run: 4 });
   });
+
+  it.each([false, true])("reuses valid refreshed server pages before child effects (changed rows: %s)", async (changed) => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const initial = [makePreset()];
+    const props = { models: [makeModel()], presets: initial, presetsTotal: 1, presetsNextOffset: null, presetsSeedValid: true,
+      sections: { queue: false, enhancementProvider: false, modelHelper: false, studioSettings: false, modelPanel: false, presets: true } };
+    const view = render(<MediaModelsConsole {...props} />);
+    expect(screen.getByRole("heading", { name: "Portrait Grid" })).toBeTruthy();
+    const refreshed = [makePreset(changed ? { label: "Refreshed preset" } : {})];
+    view.rerender(<MediaModelsConsole {...props} presets={refreshed} />);
+    await screen.findByRole("heading", { name: changed ? "Refreshed preset" : "Portrait Grid" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+
+  it("refreshes the current search after a mocked import and reuses the new server page when cleared", async () => {
+    vi.stubGlobal("FormData", window.FormData);
+    const imported = makePreset({ preset_id: "imported", key: "imported", label: "Imported preset" });
+    let available = false;
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.endsWith("/import")) { available = true; return Response.json({ ok: true, preset: imported }); }
+      return Response.json({ ok: true, presets: available ? [imported] : [], total: available ? 1 : 0, next_offset: null });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const props = { models: [makeModel()], presets: [makePreset()], presetsTotal: 1, presetsNextOffset: null, presetsSeedValid: true,
+      sections: { queue: false, enhancementProvider: false, modelHelper: false, studioSettings: false, modelPanel: false, presets: true } };
+    const view = render(<MediaModelsConsole {...props} />);
+    fireEvent.change(screen.getByLabelText("Search media presets"), { target: { value: "imported" } });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    fireEvent.change(view.container.querySelector('input[type="file"]')!, { target: { files: [new File(["mock zip"], "preset.zip", { type: "application/zip" })] } });
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url.endsWith("/import"))).toBe(true));
+    await screen.findByRole("heading", { name: "Imported preset" });
+    expect(refreshMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls.filter(([url]) => url.includes("q=imported"))).toHaveLength(2);
+    view.rerender(<MediaModelsConsole {...props} presets={[imported, makePreset()]} presetsTotal={2} />);
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => url.includes("q=imported"))).toHaveLength(3));
+    fireEvent.change(screen.getByLabelText("Search media presets"), { target: { value: "" } });
+    await screen.findByRole("heading", { name: "Portrait Grid" });
+    expect(screen.getByRole("heading", { name: "Imported preset" })).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
 });
