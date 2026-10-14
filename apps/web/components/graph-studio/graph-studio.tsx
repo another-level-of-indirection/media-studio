@@ -200,6 +200,7 @@ function GraphStudioClient() {
   const [workflowUpdatedAt, setWorkflowUpdatedAt] = useState<string | null>(
     null,
   );
+  const [nodes, setNodes, applyNodesChange] = useNodesState<StudioNode>([]);
   const {
     references,
     setReferences,
@@ -207,13 +208,12 @@ function GraphStudioClient() {
     availableCredits,
     creditsUnavailable,
     refreshCredits,
-    refreshImageAssets,
+    invalidateMediaLibrary,
     refreshAssetsByIds,
     refreshReferencesByIds,
-    refreshReferenceMedia,
-    refreshMediaLibrary,
+    mediaRevision,
     importImageFile,
-  } = useGraphMediaLibrary();
+  } = useGraphMediaLibrary(nodes);
   const [previewOverlay, setPreviewOverlay] = useState<{
     previews: GraphMediaPreview[];
     index: number;
@@ -299,7 +299,6 @@ function GraphStudioClient() {
     },
     [closeContextMenus, closeWorkflowMenu, openNodeSearch],
   );
-  const [nodes, setNodes, applyNodesChange] = useNodesState<StudioNode>([]);
   const nodesRef = useRef<StudioNode[]>([]);
   const manualNodeMoveRef = useRef(false);
   const { beginAssistantLayout, stopAssistantLayout } = useAssistantLayout({ nodes, setNodes, activeTabId });
@@ -1141,7 +1140,7 @@ function GraphStudioClient() {
 
   const { hydrateLastRun, hydrateLatestRunForWorkflow } = useGraphWorkflowRunPreview({
     appendConsole, applyRunEventsToCanvas, applyRunNodesToCanvas, nodes,
-    refreshAssetsByIds, refreshImageAssets, refreshReferenceMedia, setRun, setConsoleLines,
+    refreshAssetsByIds, setRun, setConsoleLines,
     workspaceRestoreVersionRef,
   });
 
@@ -1401,7 +1400,6 @@ function GraphStudioClient() {
       setGroups(restored.groups);
       canvasHydrated.current = true;
       setHistoryReady(true);
-      await refreshImageAssets().catch(() => undefined);
       await refreshAssetsByIds(assetIdsFromGraphRun(latestRun)).catch(
         () => undefined,
       );
@@ -1424,7 +1422,6 @@ function GraphStudioClient() {
       applyRunEventsToCanvas,
       nodeHandlers,
       refreshAssetsByIds,
-      refreshImageAssets,
       restoreVersionIsCurrent,
       setEdges,
       setNodes,
@@ -1499,10 +1496,6 @@ function GraphStudioClient() {
     );
     void refreshCredits({ startup: true });
   }, [appendConsole, refreshCredits, refreshTemplates]);
-
-  useEffect(() => {
-    void refreshMediaLibrary();
-  }, [refreshMediaLibrary]);
 
   useEffect(() => {
     if (sidebarDialog !== "runs") return;
@@ -1652,9 +1645,8 @@ function GraphStudioClient() {
     applyRunNodesToCanvas,
     applyRunEventsToCanvas,
     refreshCredits,
-    refreshImageAssets,
+    invalidateMediaLibrary,
     refreshAssetsByIds,
-    refreshReferenceMedia,
     setConsoleLines,
     appendConsole,
     confirmPricingForRun,
@@ -2108,6 +2100,7 @@ function GraphStudioClient() {
         />
         <GraphStudioFixtureLayer kind={graphFixture} />
         <GraphStudioDialogs
+          mediaRevision={mediaRevision}
           sidebarDialog={sidebarDialog}
           definitions={definitions}
           definitionsByCategory={definitionsByCategory}

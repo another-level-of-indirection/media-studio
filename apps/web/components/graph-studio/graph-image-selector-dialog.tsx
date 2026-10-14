@@ -56,6 +56,7 @@ type GraphImageSelectorDialogProps = {
   onClose: () => void;
   onSearchChange: (source: GraphImageSelectorSource, query: string) => void;
   onLoadMore: (source: GraphImageSelectorSource) => void;
+  onRefresh?: (source: GraphImageSelectorSource) => void;
   onProjectScopeChange?: (
     source: GraphImageSelectorSource,
     projectId: string | null,
@@ -192,6 +193,7 @@ export function GraphImageSelectorDialog({
   onClose,
   onSearchChange,
   onLoadMore,
+  onRefresh,
   onProjectScopeChange,
   onAddNode,
   onAttachToNode,
@@ -240,6 +242,10 @@ export function GraphImageSelectorDialog({
       previousActiveElementRef.current?.focus();
       previousActiveElementRef.current = null;
     };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) setPreviewItemId(null);
   }, [open]);
 
   if (!open) return null;
@@ -396,7 +402,10 @@ export function GraphImageSelectorDialog({
 
             {sourceState.error ? (
               <div className="admin-surface-inset flex min-h-60 items-center justify-center p-6 text-center text-sm text-[var(--muted-strong)]">
-                {sourceState.error}
+                <div role="alert">
+                  <p>{sourceState.error}</p>
+                  {onRefresh ? <AdminButton onClick={() => onRefresh(activeSource)}>Retry loading images</AdminButton> : null}
+                </div>
               </div>
             ) : sourceState.loading && !sourceState.items.length ? (
               <div className="admin-surface-inset flex min-h-60 items-center justify-center p-6 text-sm text-[var(--muted-strong)]">
@@ -435,6 +444,12 @@ export function GraphImageSelectorDialog({
                   ? dialogCopy.importedFooter
                   : dialogCopy.generatedFooter}
             </div>
+            {onRefresh ? (
+              <AdminButton variant="subtle" size="compact" disabled={sourceState.loading || sourceState.loadingMore}
+                onClick={() => onRefresh(activeSource)} aria-label="Refresh image assets">
+                Refresh
+              </AdminButton>
+            ) : null}
             {sourceState.nextOffset != null ? (
               <AdminButton
                 variant="subtle"

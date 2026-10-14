@@ -8,7 +8,7 @@ import { graphWorkflowSnapshotsMatch } from "../utils/graph-tabs";
 
 export function useGraphWorkflowRunPreview({
   appendConsole, applyRunEventsToCanvas, applyRunNodesToCanvas, nodes,
-  refreshAssetsByIds, refreshImageAssets, refreshReferenceMedia, setRun, setConsoleLines,
+  refreshAssetsByIds, setRun, setConsoleLines,
   workspaceRestoreVersionRef,
 }: {
   appendConsole: (line: string) => void;
@@ -16,8 +16,6 @@ export function useGraphWorkflowRunPreview({
   applyRunNodesToCanvas: (run: GraphRun) => void;
   nodes: StudioNode[];
   refreshAssetsByIds: (ids: string[]) => Promise<unknown>;
-  refreshImageAssets: () => Promise<unknown>;
-  refreshReferenceMedia: () => Promise<unknown>;
   setRun: (run: GraphRun) => void;
   setConsoleLines: (lines: string[]) => void;
   workspaceRestoreVersionRef: MutableRefObject<number>;
@@ -31,13 +29,10 @@ export function useGraphWorkflowRunPreview({
         if (sourceVersion !== workspaceRestoreVersionRef.current) return;
         setRun(current);
         applyRunNodesToCanvas(current);
-        await refreshImageAssets().catch(() => undefined);
         if (sourceVersion !== workspaceRestoreVersionRef.current) return;
         await refreshAssetsByIds(assetIdsFromGraphRun(current)).catch(
           () => undefined,
         );
-        if (sourceVersion !== workspaceRestoreVersionRef.current) return;
-        await refreshReferenceMedia().catch(() => undefined);
         if (sourceVersion !== workspaceRestoreVersionRef.current) return;
         const events = await jsonFetch<{ items: GraphRunEvent[] }>(
           `/api/control/media/graph/runs/${runId}/events`,
@@ -60,8 +55,6 @@ export function useGraphWorkflowRunPreview({
       applyRunNodesToCanvas,
       nodes,
       refreshAssetsByIds,
-      refreshImageAssets,
-      refreshReferenceMedia,
       setConsoleLines,
       setRun,
       workspaceRestoreVersionRef,

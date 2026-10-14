@@ -16,6 +16,15 @@ import type {
 import { jsonFetch } from "../utils/graph-api";
 
 const GRAPH_IMAGE_SELECTOR_PAGE_LIMIT = 40;
+const FIRST_PAGE_FRESH_MS = 30_000;
+const MAX_VISIBLE_ITEMS = 80;
+
+type FirstPage = {
+  key: string;
+  fetchedAt: number;
+  items: MediaImagePickerItem[];
+  nextOffset: number | null;
+};
 
 export type GraphMediaSelectorMediaType = MediaPickerMediaType;
 
@@ -26,6 +35,7 @@ type GraphImageSelectorSources = Record<
 
 type LoadSourceOptions = {
   append?: boolean;
+  force?: boolean;
   query?: string;
   projectId?: string | null;
 };
@@ -68,6 +78,7 @@ function projectOption(project: MediaProject): GraphImageSelectorProjectOption {
 
 export function useGraphImageSelectorSources(
   mediaType: GraphMediaSelectorMediaType = "image",
+  mediaRevision = 0,
 ) {
   const [sources, setSources] =
     useState<GraphImageSelectorSources>(emptySources);
@@ -77,6 +88,11 @@ export function useGraphImageSelectorSources(
     GraphImageSelectorProjectOption[]
   >([]);
   const [loadingProjectOptions, setLoadingProjectOptions] = useState(false);
+  // Only the latest first page for each source survives close/reopen. No global cache.
+  const firstPages = useRef<Partial<Record<GraphImageSelectorSource, FirstPage>>>({});
+  const revisionRef = useRef(mediaRevision);
+  const sourceKeys = useRef<Partial<Record<GraphImageSelectorSource, string>>>({});
+  const pendingKeys = useRef<Partial<Record<GraphImageSelectorSource, string>>>({});
   const sourcesRef = useRef(sources);
   const searchQueryRef = useRef(searchQuery);
   const projectIdRef = useRef(projectId);
@@ -92,10 +108,15 @@ export function useGraphImageSelectorSources(
   }, [sources]);
 
   useEffect(() => {
-    if (mediaTypeRef.current === mediaType) return;
+    if (mediaTypeRef.current === mediaType && revisionRef.current === mediaRevision) return;
+    if (mediaTypeRef.current !== mediaType) setSources(emptySources());
     mediaTypeRef.current = mediaType;
-    setSources(emptySources());
-  }, [mediaType]);
+    revisionRef.current = mediaRevision;
+    firstPages.current = {};
+    pendingKeys.current = {};
+    requestCountersRef.current.generated += 1;
+    requestCountersRef.current.imported += 1;
+  }, [mediaType, mediaRevision]);
 
   const setSearchQuery = useCallback((query: string) => {
     searchQueryRef.current = query;
@@ -105,6 +126,9 @@ export function useGraphImageSelectorSources(
   const setProjectId = useCallback((nextProjectId: string | null) => {
     projectIdRef.current = nextProjectId;
     setProjectIdState(nextProjectId);
+    requestCountersRef.current.generated += 1;
+    requestCountersRef.current.imported += 1;
+    pendingKeys.current = {};
     setSources(emptySources());
   }, []);
 
@@ -137,6 +161,23 @@ export function useGraphImageSelectorSources(
         options && "projectId" in options
           ? options.projectId ?? null
           : projectIdRef.current;
+      const key = JSON.stringify([mediaType, selectedProjectId, query.trim()]);
+      if (append && sourceKeys.current[source] !== key) return;
+      const cached = firstPages.current[source];
+      if (!append && !options?.force && cached?.key === key && Date.now() - cached.fetchedAt < FIRST_PAGE_FRESH_MS) {
+        requestCountersRef.current[source] += 1;
+        delete pendingKeys.current[source];
+        sourceKeys.current[source] = key;
+        setSources((current) => ({ ...current, [source]: {
+          ...emptySourceState(), items: cached.items, nextOffset: cached.nextOffset,
+        } }));
+        return;
+      }
+      if (options?.force) delete firstPages.current[source];
+      const pendingKey = JSON.stringify([key, offset]);
+      if (!options?.force && pendingKeys.current[source] === pendingKey) return;
+      pendingKeys.current[source] = pendingKey;
+      sourceKeys.current[source] = key;
       const requestId = requestCountersRef.current[source] + 1;
       requestCountersRef.current[source] = requestId;
 
@@ -180,11 +221,12 @@ export function useGraphImageSelectorSources(
           nextOffset = page.nextOffset;
         }
         if (requestCountersRef.current[source] !== requestId) return;
+        if (!append) firstPages.current[source] = { key, fetchedAt: Date.now(), items, nextOffset };
         setSources((current) => ({
           ...current,
           [source]: {
             ...current[source],
-            items: append ? mergeItems(current[source].items, items) : items,
+            items: append ? mergeItems(current[source].items, items).slice(-MAX_VISIBLE_ITEMS) : items,
             loading: false,
             loadingMore: false,
             nextOffset,
@@ -205,9 +247,11 @@ export function useGraphImageSelectorSources(
                 : `Unable to load ${mediaType} assets.`,
           },
         }));
+      } finally {
+        if (requestCountersRef.current[source] === requestId) delete pendingKeys.current[source];
       }
     },
-    [mediaType],
+    [mediaType, mediaRevision],
   );
 
   return {

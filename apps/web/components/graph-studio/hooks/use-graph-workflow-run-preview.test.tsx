@@ -21,7 +21,7 @@ function previewHarness() {
       applyRunNodesToCanvas: (value) => setPreview(value.run_id),
       applyRunEventsToCanvas: () => setPreview("saved-event-preview"),
       appendConsole: (line) => setConsoleLines((lines) => [...lines, line]),
-      refreshImageAssets: async () => undefined, refreshAssetsByIds: async () => undefined, refreshReferenceMedia: async () => undefined,
+      refreshAssetsByIds: async () => undefined,
     });
     return { ...restore, run, preview, consoleLines, returnToDirtyTab: () => {
       version.current += 1; setRun(null); setPreview("dirty-preview"); setConsoleLines(["Keep dirty console"]);

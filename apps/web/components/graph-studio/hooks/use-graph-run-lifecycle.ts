@@ -148,9 +148,8 @@ export function useGraphRunLifecycle({
   applyRunNodesToCanvas,
   applyRunEventsToCanvas,
   refreshCredits,
-  refreshImageAssets,
+  invalidateMediaLibrary,
   refreshAssetsByIds,
-  refreshReferenceMedia,
   setConsoleLines,
   appendConsole,
   confirmPricingForRun,
@@ -169,9 +168,8 @@ export function useGraphRunLifecycle({
   applyRunNodesToCanvas: (run: GraphRun) => void;
   applyRunEventsToCanvas?: (events: GraphRunEvent[], run: GraphRun) => void;
   refreshCredits: () => Promise<void>;
-  refreshImageAssets: () => Promise<void>;
+  invalidateMediaLibrary: () => void;
   refreshAssetsByIds: (assetIds: string[]) => Promise<void>;
-  refreshReferenceMedia: () => Promise<void>;
   setConsoleLines: (lines: string[]) => void;
   appendConsole: (line: string) => void;
   confirmPricingForRun?: () => Promise<boolean>;
@@ -347,14 +345,12 @@ export function useGraphRunLifecycle({
       const refreshedOutputKey = outputNodeCount ? `${current.run_id}:${outputNodeCount}:${assetIds.join(",")}` : null;
       if (refreshedOutputKey && refreshedOutputKeyRef.current !== refreshedOutputKey) {
         refreshedOutputKeyRef.current = refreshedOutputKey;
-        refreshReferenceMedia().catch(() => undefined);
-        refreshImageAssets()
-          .then(() => refreshAssetsByIds(assetIds))
-          .catch(() => undefined);
+        invalidateMediaLibrary();
+        void refreshAssetsByIds(assetIds).catch(() => undefined);
       }
       return current;
     },
-    [applyRunNodesToCanvas, incrementMetric, refreshAssetsByIds, refreshCredits, refreshImageAssets, refreshReferenceMedia, setRun],
+    [applyRunNodesToCanvas, incrementMetric, refreshAssetsByIds, refreshCredits, invalidateMediaLibrary, setRun],
   );
 
   const refreshRunState = useCallback(

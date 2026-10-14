@@ -217,3 +217,19 @@ describe("GraphImageSelectorDialog", () => {
     );
   });
 });
+
+it("offers explicit refresh/retry and releases preview DOM across close/reopen", () => {
+  const onRefresh = vi.fn();
+  const { rerender, props } = renderSelector({ onRefresh });
+  fireEvent.click(screen.getByRole("button", { name: "Refresh image assets" }));
+  expect(onRefresh).toHaveBeenCalledWith("generated");
+  fireEvent.click(screen.getByRole("button", { name: "Preview image asset-1" }));
+  expect(screen.getByRole("dialog", { name: "Image preview" })).toBeTruthy();
+  rerender(<GraphImageSelectorDialog {...props} open={false} />);
+  expect(screen.queryByRole("dialog")).toBeNull();
+  rerender(<GraphImageSelectorDialog {...props} />);
+  expect(screen.queryByRole("dialog", { name: "Image preview" })).toBeNull();
+  rerender(<GraphImageSelectorDialog {...props} generated={{ ...emptySource, error: "Offline" }} />);
+  fireEvent.click(screen.getByRole("button", { name: "Retry loading images" }));
+  expect(onRefresh).toHaveBeenCalledTimes(2);
+});

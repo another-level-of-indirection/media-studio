@@ -21,6 +21,7 @@ import type { GraphNodeSearchPopoverState } from "./hooks/use-graph-node-search"
 
 export function GraphStudioDialogs({
   sidebarDialog,
+  mediaRevision,
   definitions,
   definitionsByCategory,
   workflowBrowser,
@@ -70,6 +71,7 @@ export function GraphStudioDialogs({
   onAttachAsset,
 }: {
   sidebarDialog: GraphSidebarDialog | null;
+  mediaRevision?: number;
   definitions: GraphNodeDefinition[];
   definitionsByCategory: Record<string, GraphNodeDefinition[]>;
   workflowBrowser: GraphWorkflowBrowser;
@@ -120,7 +122,7 @@ export function GraphStudioDialogs({
 }) {
   const selectorMediaType =
     sidebarDialog === "images" ? "image" : imageLibraryMediaType;
-  const imageSelector = useGraphImageSelectorSources(selectorMediaType);
+  const imageSelector = useGraphImageSelectorSources(selectorMediaType, mediaRevision);
   const imageSelectorOpen = sidebarDialog === "images" || Boolean(imageLibraryNodeId);
   const imageSelectorMode = imageLibraryNodeId
     ? ({ kind: "attach-node", nodeId: imageLibraryNodeId } as const)
@@ -197,6 +199,7 @@ export function GraphStudioDialogs({
         loadingProjectOptions={imageSelector.loadingProjectOptions}
         onClose={closeImageSelector}
         onSearchChange={handleSearchChange}
+        onRefresh={(source) => void imageSelector.loadSource(source, { force: true })}
         onLoadMore={(source) =>
           void imageSelector.loadSource(source, { append: true })
         }
