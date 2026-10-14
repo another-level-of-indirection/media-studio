@@ -3,6 +3,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, Clapperboard, LoaderCircle, XCircle } from "lucide-react";
 
+import type { JobsBatchCardView, JobsCardJob } from "@/app/jobs/jobs-batch-card-view";
 import { MediaBatchActions } from "@/app/jobs/media-batch-actions";
 import {
   adminInsetCompactClassName,
@@ -14,41 +15,16 @@ import {
 import { StudioLightbox } from "@/components/studio/studio-lightbox";
 import { CalloutPanel, SurfaceInset } from "@/components/ui/surface-primitives";
 import { mediaDisplayUrl, mediaPlaybackUrl, mediaVariantUrl, toneForStatus } from "@/lib/media-studio-helpers";
-import type { MediaAsset, MediaBatch, MediaJob } from "@/lib/types";
-import { cn, formatCreditsAmount, formatDateTime, formatUsdAmount, isRecord, toFiniteNumber, truncate } from "@/lib/utils";
+import type { MediaAsset } from "@/lib/types";
+import { cn, formatCreditsAmount, formatDateTime, formatUsdAmount, truncate } from "@/lib/utils";
 
 type JobsBatchCardProps = {
-  batch: MediaBatch;
+  batch: JobsBatchCardView;
   assets: MediaAsset[];
 };
 
-function batchPromptSummary(batch: MediaBatch) {
-  const promptSummary = batch.request_summary?.prompt_summary;
-  return typeof promptSummary === "string" && promptSummary.trim()
-    ? promptSummary.trim()
-    : "No prompt recorded for this batch.";
-}
-
-function batchAssetForJob(job: MediaJob, assets: MediaAsset[]) {
+function batchAssetForJob(job: JobsCardJob, assets: MediaAsset[]) {
   return assets.find((asset) => asset.job_id === job.job_id) ?? null;
-}
-
-function batchPricingSummary(batch: MediaBatch) {
-  const requestSummary = isRecord(batch.request_summary) ? batch.request_summary : null;
-  const requestPricing = isRecord(requestSummary?.pricing_summary) ? requestSummary.pricing_summary : null;
-  if (requestPricing) {
-    return requestPricing;
-  }
-
-  for (const job of batch.jobs ?? []) {
-    const preflight = isRecord(job.preflight) ? job.preflight : null;
-    const pricing = isRecord(preflight?.pricing_summary) ? preflight.pricing_summary : null;
-    if (pricing) {
-      return pricing;
-    }
-  }
-
-  return null;
 }
 
 function batchStatusLabel(status: string | null | undefined) {
@@ -91,10 +67,7 @@ export function JobsBatchCard({ batch, assets }: JobsBatchCardProps) {
     () => [...(batch.jobs ?? [])].sort((left, right) => (left.batch_index ?? 1) - (right.batch_index ?? 1)),
     [batch.jobs],
   );
-  const pricingSummary = batchPricingSummary(batch);
-  const totalPricing = isRecord(pricingSummary?.total) ? pricingSummary.total : null;
-  const perOutputPricing = isRecord(pricingSummary?.per_output) ? pricingSummary.per_output : null;
-  const savedOutputCount = toFiniteNumber(pricingSummary?.output_count);
+  const pricingSummary = batch.pricing_summary;
   const [lightboxAssetId, setLightboxAssetId] = useState<string | number | null>(null);
   const lightboxVideoRef = useRef<HTMLVideoElement | null>(null);
   const lightboxAssetIds = useMemo(
@@ -158,7 +131,7 @@ export function JobsBatchCard({ batch, assets }: JobsBatchCardProps) {
                   </div>
                 </div>
                 <p className="max-w-none pr-4 text-sm leading-6 text-[var(--muted-strong)]">
-                  {truncate(batchPromptSummary(batch), 180)}
+                  {batch.prompt_summary}
                 </p>
               </div>
               <div className="flex flex-col items-end gap-2">
@@ -184,20 +157,20 @@ export function JobsBatchCard({ batch, assets }: JobsBatchCardProps) {
                   <div className="grid gap-1">
                     <span className="admin-label-muted">Estimated total</span>
                     <span className="text-[var(--foreground)]">
-                      {formatUsdAmount(totalPricing?.estimated_cost_usd)}{" "}
-                      <span className="text-[var(--muted-strong)]">/ {formatCreditsAmount(totalPricing?.estimated_credits)} credits</span>
+                      {formatUsdAmount(pricingSummary.totalUsd)}{" "}
+                      <span className="text-[var(--muted-strong)]">/ {formatCreditsAmount(pricingSummary.totalCredits)} credits</span>
                     </span>
                   </div>
                   <div className="grid gap-1">
                     <span className="admin-label-muted">Per output</span>
                     <span className="text-[var(--foreground)]">
-                      {formatUsdAmount(perOutputPricing?.estimated_cost_usd)}{" "}
-                      <span className="text-[var(--muted-strong)]">/ {formatCreditsAmount(perOutputPricing?.estimated_credits)} credits</span>
+                      {formatUsdAmount(pricingSummary.perOutputUsd)}{" "}
+                      <span className="text-[var(--muted-strong)]">/ {formatCreditsAmount(pricingSummary.perOutputCredits)} credits</span>
                     </span>
                   </div>
                   <div className="grid gap-1">
                     <span className="admin-label-muted">Outputs</span>
-                    <span className="text-[var(--foreground)]">{savedOutputCount ?? batch.requested_outputs}</span>
+                    <span className="text-[var(--foreground)]">{pricingSummary.outputCount ?? batch.requested_outputs}</span>
                   </div>
                 </SurfaceInset>
               ) : null}
