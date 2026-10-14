@@ -315,7 +315,10 @@ export function MediaStudio({
     initialAssetsNextOffset,
     initialAssetsNextCursor,
     latestAsset,
-    onMessage: setFormMessage,
+    onMessage: (message) => {
+      setFormMessage(message);
+      showFloatingComposerBanner(message, 5200);
+    },
   });
   const selection = useStudioSelection({
     initialSelectedAssetId,
