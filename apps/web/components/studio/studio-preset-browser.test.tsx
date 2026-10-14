@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { StrictMode } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -279,4 +280,71 @@ describe("StudioPresetBrowser", () => {
     expect(screen.getByText("Showing 75 of 75")).toBeTruthy();
     expect(screen.queryByText("Load more presets")).toBeNull();
   });
+});
+
+
+describe("Studio preset request ownership", () => {
+  afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+  const renderBrowser = () => render(<StrictMode><StudioPresetBrowser presets={presets} models={models} onClose={vi.fn()} onSelectPreset={vi.fn()} /></StrictMode>);
+
+  it("shares the initial summary read through Strict Mode effect replay", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true, presets, total: 1, next_offset: null })));
+    vi.stubGlobal("fetch", fetchMock);
+    renderBrowser();
+    await screen.findByText("Showing 1 of 1");
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+  });
+
+  it("treats successful empty remote results as authoritative and retries failed reads", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: false, error: "Read failed" }), { status: 500 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, presets: [], total: 0, next_offset: null })));
+    vi.stubGlobal("fetch", fetchMock);
+    renderBrowser();
+    fireEvent.click(await screen.findByRole("button", { name: "Retry loading presets" }));
+    await screen.findByText("Showing 0 of 0");
+    expect(screen.queryByTestId("studio-preset-browser-card-preset-1")).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("discards an old initial query response", async () => {
+    let resolveOld!: (response: Response) => void;
+    const old = new Promise<Response>((resolve) => { resolveOld = resolve; });
+    const fetchMock = vi.fn((url: string) => url.includes("q=old") ? old : Promise.resolve(new Response(JSON.stringify({ ok: true, presets: [], total: 0, next_offset: null }))));
+    vi.stubGlobal("fetch", fetchMock);
+    renderBrowser();
+    await screen.findByText("Showing 0 of 0");
+    fireEvent.change(screen.getByLabelText("Search presets"), { target: { value: "old" } });
+    fireEvent.change(screen.getByLabelText("Search presets"), { target: { value: "latest" } });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/control/media-presets?limit=60&offset=0&status=active&view=summary&q=latest"));
+    await act(async () => resolveOld(new Response(JSON.stringify({ ok: true, presets, total: 1, next_offset: null }))));
+    expect(screen.queryByTestId("studio-preset-browser-card-preset-1")).toBeNull();
+  });
+});
+
+
+it("preserves summary/category/page scope and rejects an old load-more completion", async () => {
+  let resolveMore!: (response: Response) => void;
+  const more = new Promise<Response>((resolve) => { resolveMore = resolve; });
+  let intersect!: IntersectionObserverCallback;
+  vi.stubGlobal("IntersectionObserver", class {
+    constructor(callback: IntersectionObserverCallback) { intersect = callback; }
+    observe = vi.fn(); disconnect = vi.fn();
+  });
+  const fetchMock = vi.fn((url: string) => {
+    if (url.includes("offset=60")) return more;
+    return Promise.resolve(new Response(JSON.stringify({ ok: true, presets: url.includes("category=portrait") ? [] : presets, total: 2, next_offset: url.includes("category=portrait") ? null : 60 })));
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(<StudioPresetBrowser presets={presets} models={models} onClose={vi.fn()} onSelectPreset={vi.fn()} />);
+  await screen.findByText("Showing 1 of 2");
+  act(() => intersect([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver));
+  act(() => intersect([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver));
+  fireEvent.click(screen.getByRole("button", { name: "All categories" }));
+  fireEvent.click(screen.getByRole("button", { name: "Portraits", exact: true }));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/control/media-presets?limit=60&offset=0&status=active&view=summary&category=portrait"));
+  await act(async () => resolveMore(new Response(JSON.stringify({ ok: true, presets, total: 2, next_offset: null }))));
+  expect(screen.queryByTestId("studio-preset-browser-card-preset-1")).toBeNull();
+  expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("offset=60"))).toHaveLength(1);
+  cleanup(); vi.unstubAllGlobals();
 });

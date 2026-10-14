@@ -25,6 +25,7 @@ export default async function PresetsPage({
         presets={snapshot.presets.data?.presets ?? []}
         presetsTotal={snapshot.presets.data?.total}
         presetsNextOffset={snapshot.presets.data?.next_offset}
+        presetsSeedValid={snapshot.presets.ok && snapshot.presets.data?.limit === 60 && snapshot.presets.data?.offset === 0}
         promptRecipes={snapshot.promptRecipes.data?.recipes ?? []}
         enhancementConfigs={snapshot.enhancementConfigs.data?.configs ?? []}
         queueSettings={snapshot.queueSettings.data?.settings ?? null}

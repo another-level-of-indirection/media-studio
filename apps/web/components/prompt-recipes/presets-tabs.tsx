@@ -18,6 +18,7 @@ type PresetsTabsProps = {
   presets: MediaPreset[];
   presetsTotal?: number;
   presetsNextOffset?: number | null;
+  presetsSeedValid?: boolean;
   promptRecipes: PromptRecipe[];
   enhancementConfigs: MediaEnhancementConfig[];
   queueSettings: MediaQueueSettings | null;
@@ -35,6 +36,7 @@ export function PresetsTabs({
   presets,
   presetsTotal,
   presetsNextOffset,
+  presetsSeedValid,
   promptRecipes,
   enhancementConfigs,
   queueSettings,
@@ -77,6 +79,7 @@ export function PresetsTabs({
           presets={presets}
           presetsTotal={presetsTotal}
           presetsNextOffset={presetsNextOffset}
+          presetsSeedValid={presetsSeedValid}
           enhancementConfigs={enhancementConfigs}
           queueSettings={queueSettings}
           queuePolicies={queuePolicies}

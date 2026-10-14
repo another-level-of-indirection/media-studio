@@ -2,8 +2,9 @@
 
 import { ListFilter, Pencil, Sparkles, X } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
+import { useMediaPresetPages } from "@/hooks/use-media-preset-pages";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { PillSelect } from "@/components/ui/pill-select";
@@ -38,13 +39,6 @@ const PRESET_BROWSER_PAGE_SIZE = 60;
 
 type PresetBrowserItem = MediaPreset | MediaPresetSummaryItem;
 
-type PresetBrowserPage = {
-  presets: PresetBrowserItem[];
-  total: number;
-  offset: number;
-  next_offset: number | null;
-};
-
 function presetInputSummary(preset: PresetBrowserItem) {
   const textFieldCount =
     "input_schema_count" in preset && typeof preset.input_schema_count === "number"
@@ -77,27 +71,6 @@ function presetBrowserThumbnailVisual(preset: PresetBrowserItem) {
   return preset.thumbnail_url ?? null;
 }
 
-async function fetchPresetPage(query: string, category: string, offset: number): Promise<PresetBrowserPage> {
-  const params = new URLSearchParams({
-    limit: String(PRESET_BROWSER_PAGE_SIZE),
-    offset: String(offset),
-    status: "active",
-    view: "summary",
-  });
-  if (query.trim()) params.set("q", query.trim());
-  if (category !== "all") params.set("category", category);
-  const response = await fetch(`/api/control/media-presets?${params.toString()}`);
-  const payload = (await response.json().catch(() => ({}))) as PresetBrowserPage & { ok?: boolean; error?: string };
-  if (!response.ok) throw new Error(payload.error ?? "Unable to load presets.");
-  if (payload.ok === false) throw new Error(payload.error ?? "Unable to load presets.");
-  return {
-    presets: Array.isArray(payload.presets) ? payload.presets : [],
-    total: Number(payload.total ?? 0),
-    offset: Number(payload.offset ?? offset),
-    next_offset: payload.next_offset ?? null,
-  };
-}
-
 async function fetchPresetDetail(presetId: string): Promise<MediaPreset> {
   const response = await fetch(`/api/control/media-presets/${encodeURIComponent(presetId)}`, {
     headers: { Accept: "application/json" },
@@ -122,12 +95,18 @@ export function StudioPresetBrowser({
   const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
   const deferredQuery = useDeferredValue(query);
   const deferredCategory = useDeferredValue(selectedCategory);
-  const [remotePage, setRemotePage] = useState<PresetBrowserPage | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
+  const { page: remotePage, loading, loadingMore, error: pageError, loadMore: loadMorePresets, retry } = useMediaPresetPages({
+    query: deferredQuery,
+    category: deferredCategory,
+    view: "summary",
+    refreshKey: presets,
+  });
   const [selectingPresetId, setSelectingPresetId] = useState<string | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [selectionError, setSelectionError] = useState<string | null>(null);
+  const loadError = pageError ?? selectionError;
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => { setSelectionError(null); }, [deferredCategory, deferredQuery]);
   const studioReturnToHref =
     returnToHref && returnToHref.startsWith("/") && !returnToHref.startsWith("//")
       ? returnToHref
@@ -140,56 +119,9 @@ export function StudioPresetBrowser({
         .slice(0, PRESET_BROWSER_PAGE_SIZE),
     [deferredCategory, deferredQuery, presets],
   );
-  const visiblePresets = remotePage?.presets.length ? remotePage.presets : fallbackPresets;
+  const visiblePresets = remotePage ? remotePage.presets : fallbackPresets;
   const totalPresets = remotePage?.total ?? presets.length;
-  const nextOffset = loadError
-    ? null
-    : remotePage
-    ? remotePage.next_offset
-    : fallbackPresets.length < presets.length
-      ? PRESET_BROWSER_PAGE_SIZE
-      : null;
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setLoadError(null);
-    void fetchPresetPage(deferredQuery, deferredCategory, 0)
-      .then((page) => {
-        if (!cancelled) setRemotePage(page);
-      })
-      .catch((error: unknown) => {
-        if (!cancelled) {
-          setRemotePage(null);
-          setLoadError(error instanceof Error ? error.message : "Unable to load presets.");
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [deferredCategory, deferredQuery]);
-
-  const loadMorePresets = useCallback(async () => {
-    if (nextOffset == null) return;
-    setLoadingMore(true);
-    setLoadError(null);
-    try {
-      const page = await fetchPresetPage(deferredQuery, deferredCategory, nextOffset);
-      setRemotePage((current) => ({
-        presets: [...(current?.presets ?? fallbackPresets), ...page.presets],
-        total: page.total,
-        offset: current?.offset ?? 0,
-        next_offset: page.next_offset,
-      }));
-    } catch (error) {
-      setLoadError(error instanceof Error ? error.message : "Unable to load more presets.");
-    } finally {
-      setLoadingMore(false);
-    }
-  }, [deferredCategory, deferredQuery, fallbackPresets, nextOffset]);
+  const nextOffset = pageError ? null : remotePage?.next_offset ?? null;
 
   const categoryChoices = useMemo(
     () => [
@@ -205,12 +137,12 @@ export function StudioPresetBrowser({
     const presetId = preset.preset_id ?? preset.key;
     if (!presetId || selectingPresetId) return;
     setSelectingPresetId(presetId);
-    setLoadError(null);
+    setSelectionError(null);
     try {
       const detail = await fetchPresetDetail(presetId);
       onSelectPreset(detail);
     } catch (error) {
-      setLoadError(error instanceof Error ? error.message : "Unable to load preset details.");
+      setSelectionError(error instanceof Error ? error.message : "Unable to load preset details.");
     } finally {
       setSelectingPresetId(null);
     }
@@ -296,7 +228,8 @@ export function StudioPresetBrowser({
       </StudioBrowserToolbar>
       {loadError ? (
         <div className="mb-4 rounded-2xl border border-amber-300/25 bg-amber-300/10 px-4 py-3 text-sm text-amber-100">
-          {loadError} Showing the first matching local presets instead.
+          {loadError}{pageError && !remotePage ? " Showing the first matching local presets instead." : null}
+          {pageError ? <Button type="button" variant="subtle" size="compact" onClick={retry}>Retry loading presets</Button> : null}
         </div>
       ) : null}
       {visiblePresets.length ? (

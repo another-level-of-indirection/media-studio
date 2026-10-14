@@ -38,6 +38,7 @@ type MediaModelsConsoleProps = {
   presets?: MediaPreset[];
   presetsTotal?: number;
   presetsNextOffset?: number | null;
+  presetsSeedValid?: boolean;
   enhancementConfigs?: MediaEnhancementConfig[];
   queueSettings?: MediaQueueSettings | null;
   queuePolicies?: MediaModelQueuePolicy[];
@@ -82,6 +83,7 @@ export function MediaModelsConsole({
   presets = EMPTY_PRESETS,
   presetsTotal,
   presetsNextOffset,
+  presetsSeedValid,
   enhancementConfigs = EMPTY_ENHANCEMENT_CONFIGS,
   queueSettings,
   queuePolicies = [],
@@ -417,6 +419,7 @@ export function MediaModelsConsole({
           presets={localPresets}
           total={presetsTotal}
           nextOffset={presetsNextOffset}
+          seedValid={presetsSeedValid && localPresets === presets}
           isImporting={isImportingPreset}
           onImportClick={() => presetImportInputRef.current?.click()}
         />
