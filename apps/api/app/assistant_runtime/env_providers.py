@@ -3,7 +3,8 @@
 These providers are not stored in AI Settings. They are selected with
 ``MEDIA_ASSISTANT_PROVIDER`` and configured with ``MERGE_API_KEY``,
 ``MERGE_MODEL`` and ``MERGE_BASE_URL`` (Merge) or ``MTPLX_BASE_URL``,
-``MTPLX_MODEL`` and ``MTPLX_THINKING`` (a local MTPLX server, no key). The environment wins over any stored
+``MTPLX_MODEL`` and ``MTPLX_THINKING`` (a local MTPLX server, no key), or
+``CLAUDE_CODE_BIN`` and ``CLAUDE_CODE_MODEL`` (the local Claude Code CLI, which owns its sign-in). The environment wins over any stored
 Media Assistant model, because a stored Codex model id is meaningless to them.
 """
 
@@ -14,7 +15,7 @@ from typing import Any, Dict, Optional
 
 from ..settings import settings
 
-ENV_PROVIDER_KINDS = ("merge_gateway", "mtplx")
+ENV_PROVIDER_KINDS = ("merge_gateway", "mtplx", "claude_code")
 VISION_PROVIDER_KINDS = ("merge_gateway", "mtplx")  # both accept OpenAI-style image_url parts.
 PROMPT_CACHE_KINDS = ("merge_gateway",)  # Anthropic caches only prefixes ending at a cache_control marker.
 ANTHROPIC_SCHEMA_KINDS = ("merge_gateway",)  # Anthropic structured output rejects size/range keywords.
@@ -60,6 +61,12 @@ def env_provider_config(kind: Optional[str]) -> Optional[EnvProviderConfig]:
             extra_body={"chat_template_kwargs": {"enable_thinking": bool(settings.mtplx_thinking)}},
             http_timeout=900.0,
         )
+    if kind == "claude_code":
+        # The local CLI owns its own sign-in; there is no endpoint or key here.
+        return EnvProviderConfig(
+            base_url="", api_key=None, model=(settings.claude_code_model or "").strip() or "sonnet",
+            key_required=False, http_timeout=900.0,
+        )
     if kind != "merge_gateway":
         return None
     return EnvProviderConfig(
@@ -96,6 +103,10 @@ def assistant_runtime_readiness(codex_ready: bool) -> Dict[str, Any]:
     kind, _ = configured_assistant_provider({})
     if kind == "codex_local":
         return {"kind": kind, "ready": bool(codex_ready)}
+    if kind == "claude_code":
+        from .claude_code import claude_code_ready
+
+        return {"kind": kind, "ready": claude_code_ready()}
     try:
         resolve_assistant_provider_runtime({})
     except AssistantProviderChatError:

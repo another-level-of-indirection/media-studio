@@ -131,6 +131,22 @@ MTPLX_THINKING=
 - Assistant settings in the UI still list only the stored providers (no Merge Gateway option).
 - Other providers (`local_openai`, `openrouter`) are still flag-only and show the Codex-oriented UI copy in some settings panels.
 
+### Claude Code (`claude_code`, local CLI)
+
+Selected with `MEDIA_ASSISTANT_PROVIDER=claude_code` (`assistant_runtime/claude_code.py`). It subclasses the
+OpenAI-compatible runtime and swaps only the transport: each step is one headless `claude -p` call with
+`--json-schema` structured output. Everything that could act on the machine is off (`--tools ""`,
+`--restricted`, `--strict-mcp-config`, `--disable-slash-commands`, an empty working directory), so Claude Code
+is only a model transport. The transcript is client-managed and replayed as the prompt
+(`--no-session-persistence`), so compaction and failed steps behave like the other runtimes.
+
+* Sign-in belongs to Claude Code. Readiness runs `claude auth status` (cached 30 s); an expired session fails a
+  step with "run `claude auth login`" and shows the assistant as not ready.
+* Stop kills the process. Transient API statuses (429/5xx/529) are retried like the HTTP runtimes.
+* No vision (images are replaced by a note) and Claude Code adds its own preamble to each request.
+* Usage reports `prompt_tokens`, `completion_tokens`, `cost` (Claude Code's `total_cost_usd`) and cache reads.
+* Tests use a fake `claude` executable (`tests/test_assistant_claude_code.py`); nothing there needs an account.
+
 ## Adding a runtime
 
 1. Implement the `AssistantRuntime` protocol in `apps/api/app/assistant_runtime/<name>.py`. Decide `provider_managed_state`. If it is false, own the transcript and compaction as the OpenAI-compatible runtime does.

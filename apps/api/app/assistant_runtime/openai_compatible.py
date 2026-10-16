@@ -192,6 +192,7 @@ class OpenAICompatibleRuntime:
     # budget would re-trim every turn, and each trim changes the replayed
     # prefix and so invalidates the provider's prompt cache.
     COMPACTION_TARGET_RATIO = 0.6
+    endpoint_required = True
 
     def __init__(
         self,
@@ -301,35 +302,8 @@ class OpenAICompatibleRuntime:
             "dropped_messages": len(messages) - len(trimmed),
         }
 
-    # -- AssistantRuntime -------------------------------------------------------
-    def run_step(self, request: StepRequest) -> StepResult:
-        started = time.perf_counter()
-        base_url = (request.connection.base_url or "").strip()
-        if not base_url:
-            raise enhancement_provider.EnhancementProviderError(
-                f"{self.kind} has no endpoint configured for the Media Assistant."
-            )
-        stateful = request.session_key is not None
-        lifecycle: List[str] = []
-        reuse_mode: Optional[str] = None
-        state_id: Optional[str] = None
-        transcript: Dict[str, Any] = {"instructions": {}, "messages": []}
-        if stateful:
-            state_id, transcript, lifecycle, reuse_mode = self._open_transcript(request)
-        history = list(transcript["messages"])
-        compaction = None
-        if stateful and request.compact_before_turn:
-            if request.on_compaction:
-                request.on_compaction(True)
-            try:
-                history, compaction = self._compact(history)
-            finally:
-                if request.on_compaction:
-                    request.on_compaction(False)
-        outbound = [
-            *(self._instruction_messages(transcript["instructions"]) if stateful else []),
-            *(_wire_message(message) for message in (*history, *request.messages)),
-        ]
+    def _complete(self, request: StepRequest, outbound: List[Dict[str, Any]], base_url: str) -> Dict[str, Any]:
+        """One model call over the replayed messages. Subclasses swap the transport."""
         max_tokens = max(int(request.connection.max_tokens or 0), self.STEP_MIN_MAX_TOKENS)
         env_config = env_provider_config(self.kind)
         chat_kwargs = dict(
@@ -355,6 +329,38 @@ class OpenAICompatibleRuntime:
             cancel_event=request.cancel_event,
             timeout_seconds=None if request.unbounded else request.timeout_seconds,
         )
+        return result
+
+    # -- AssistantRuntime -------------------------------------------------------
+    def run_step(self, request: StepRequest) -> StepResult:
+        started = time.perf_counter()
+        base_url = (request.connection.base_url or "").strip()
+        if self.endpoint_required and not base_url:
+            raise enhancement_provider.EnhancementProviderError(
+                f"{self.kind} has no endpoint configured for the Media Assistant."
+            )
+        stateful = request.session_key is not None
+        lifecycle: List[str] = []
+        reuse_mode: Optional[str] = None
+        state_id: Optional[str] = None
+        transcript: Dict[str, Any] = {"instructions": {}, "messages": []}
+        if stateful:
+            state_id, transcript, lifecycle, reuse_mode = self._open_transcript(request)
+        history = list(transcript["messages"])
+        compaction = None
+        if stateful and request.compact_before_turn:
+            if request.on_compaction:
+                request.on_compaction(True)
+            try:
+                history, compaction = self._compact(history)
+            finally:
+                if request.on_compaction:
+                    request.on_compaction(False)
+        outbound = [
+            *(self._instruction_messages(transcript["instructions"]) if stateful else []),
+            *(_wire_message(message) for message in (*history, *request.messages)),
+        ]
+        result = self._complete(request, outbound, base_url)
         text = str(result.get("generated_text") or "").strip()
         if request.response_schema:
             try:
@@ -409,5 +415,9 @@ def register_experimental_runtimes(kinds: Optional[Tuple[str, ...]] = None) -> N
         enabled = (*enabled, selected_env_provider())
     registered = get_registered_kinds()
     for kind in enabled:
-        if kind in SUPPORTED_KINDS and kind not in registered:
+        if kind == "claude_code" and kind not in registered:
+            from .claude_code import ClaudeCodeRuntime
+
+            register_runtime(ClaudeCodeRuntime(kind))
+        elif kind in SUPPORTED_KINDS and kind not in registered:
             register_runtime(OpenAICompatibleRuntime(kind, vision=kind in VISION_PROVIDER_KINDS, strip_constraints=kind in ANTHROPIC_SCHEMA_KINDS, prompt_cache=kind in PROMPT_CACHE_KINDS, stream=settings.media_assistant_stream))

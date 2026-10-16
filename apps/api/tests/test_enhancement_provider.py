@@ -340,7 +340,7 @@ def test_run_openai_compatible_enhancement_disables_reasoning_for_openrouter(mon
     monkeypatch.setattr(
         enhancement_provider,
         "_http_client",
-        lambda: _FakeClient(response, captured),
+        lambda timeout=None: _FakeClient(response, captured),
     )
 
     result = enhancement_provider.run_openai_compatible_enhancement(
@@ -378,7 +378,7 @@ def test_run_openai_compatible_enhancement_rejects_reasoning_only_responses(monk
     monkeypatch.setattr(
         enhancement_provider,
         "_http_client",
-        lambda: _FakeClient(response, captured),
+        lambda timeout=None: _FakeClient(response, captured),
     )
 
     with pytest.raises(
@@ -412,7 +412,7 @@ def test_run_openai_compatible_chat_omits_runtime_overrides_when_not_set(monkeyp
     monkeypatch.setattr(
         enhancement_provider,
         "_http_client",
-        lambda: _FakeClient(response, captured),
+        lambda timeout=None: _FakeClient(response, captured),
     )
 
     result = enhancement_provider.run_openai_compatible_chat(

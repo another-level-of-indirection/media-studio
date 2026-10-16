@@ -97,6 +97,8 @@ class AppSettings(BaseModel):
     mtplx_base_url: str = "http://127.0.0.1:8000/v1"
     mtplx_model: str = "mtplx"
     mtplx_thinking: bool = False
+    claude_code_bin: Optional[str] = None
+    claude_code_model: str = "sonnet"
     control_api_token: str = "media-studio-local-control-token"
     kie_api_key: Optional[str] = None
     openrouter_api_key: Optional[str] = None
@@ -165,6 +167,8 @@ settings = AppSettings(
     mtplx_base_url=os.getenv("MTPLX_BASE_URL", "").strip() or "http://127.0.0.1:8000/v1",
     mtplx_model=os.getenv("MTPLX_MODEL", "").strip() or "mtplx",
     mtplx_thinking=os.getenv("MTPLX_THINKING", "").strip() == "1",
+    claude_code_bin=os.getenv("CLAUDE_CODE_BIN", "").strip() or None,
+    claude_code_model=os.getenv("CLAUDE_CODE_MODEL", "").strip() or "sonnet",
     control_api_token=_resolve_control_api_token(_env_str("MEDIA_STUDIO_APP_ENV", "development")),
     kie_api_key=os.getenv("KIE_API_KEY"),
     openrouter_api_key=os.getenv("OPENROUTER_API_KEY"),
