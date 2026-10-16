@@ -32,6 +32,8 @@ class HealthResponse(BaseModel):
     codex_local_login_configured: bool = False
     codex_local_ready: bool = False
     media_assistant_enabled: bool = False
+    media_assistant_runtime: Optional[str] = None
+    media_assistant_runtime_ready: Optional[bool] = None
     runner_name: str = "Media Studio Runner"
     runner_mode: str = "embedded"
     runner_attached_to: str = "Media Studio API"

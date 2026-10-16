@@ -5,7 +5,7 @@ import { isGraphAssistantAvailable, isGraphAssistantDebugEnabled } from "@/lib/g
 import type { ControlApiHealthData } from "@/lib/types";
 import { readGraphStartup } from "../utils/graph-startup-reads";
 
-export type GraphAssistantAvailability = "checking" | "disabled" | "missing" | "signed_out" | "unready" | "error" | "ready";
+export type GraphAssistantAvailability = "checking" | "disabled" | "missing" | "signed_out" | "unready" | "runtime_unready" | "error" | "ready";
 
 export function useGraphAssistantAvailability() {
   const [status, setStatus] = useState<GraphAssistantAvailability>("checking");
@@ -27,6 +27,7 @@ export function useGraphAssistantAvailability() {
         setStatus(
           isGraphAssistantAvailable(health) ? "ready"
             : health.media_assistant_enabled !== true ? "disabled"
+              : health.media_assistant_runtime && health.media_assistant_runtime !== "codex_local" ? "runtime_unready"
               : health.codex_local_command_available === false ? "missing"
                 : health.codex_local_login_configured === false ? "signed_out"
                   : "unready",

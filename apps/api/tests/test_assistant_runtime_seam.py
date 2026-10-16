@@ -408,3 +408,101 @@ def test_transcripts_are_not_served_by_the_media_file_endpoint(app_modules) -> N
 
     assert main._resolve_media_file_path(str(transcript)) is None
     assert main._resolve_media_file_path("runtime/assistant-transcripts/transcript_secret.json") is None
+
+
+def _use_merge(monkeypatch, *, key="mg_test", base="https://api-gateway.merge.dev/v1"):
+    settings_module = importlib.import_module("app.settings")
+    for name, value in {
+        "media_assistant_provider": "merge_gateway",
+        "merge_api_key": key,
+        "merge_model": "anthropic/claude-haiku-5-5",
+        "merge_base_url": base,
+    }.items():
+        monkeypatch.setattr(settings_module.settings, name, value, raising=False)
+
+
+def test_merge_gateway_is_selected_from_the_environment(app_modules, monkeypatch) -> None:
+    del app_modules
+    _use_merge(monkeypatch)
+    support = importlib.import_module("app.assistant.provider_support")
+    runtime_module = importlib.import_module("app.assistant_runtime")
+
+    resolved = support.resolve_assistant_provider_runtime({"provider_kind": "codex_local", "provider_model_id": "gpt-x"})
+
+    assert resolved.provider_kind == "merge_gateway"
+    assert resolved.provider_model_id == "anthropic/claude-haiku-5-5"  # env wins over a stored Codex model
+    assert resolved.provider_base_url == "https://api-gateway.merge.dev/v1/openai"  # /v1 is normalised
+    assert resolved.api_key == "mg_test"
+    assert support.configured_assistant_provider({}) == ("merge_gateway", "anthropic/claude-haiku-5-5")
+    assert runtime_module.runtime_supports_kernel("merge_gateway") is True
+    assert runtime_module.runtime_supports_vision("merge_gateway") is True
+
+
+def test_merge_gateway_without_a_key_is_a_configuration_error(app_modules, monkeypatch) -> None:
+    del app_modules
+    _use_merge(monkeypatch, key=None)
+    support = importlib.import_module("app.assistant.provider_support")
+
+    with pytest.raises(support.AssistantProviderConfigurationError):
+        support.resolve_assistant_provider_runtime({})
+
+
+def test_unset_override_keeps_codex_local(app_modules) -> None:
+    del app_modules
+    support = importlib.import_module("app.assistant.provider_support")
+    runtime_module = importlib.import_module("app.assistant_runtime")
+
+    assert support.configured_assistant_provider({})[0] == "codex_local"
+    assert runtime_module.get_assistant_runtime("merge_gateway") is None
+
+
+def test_runtime_readiness_follows_the_selected_runtime(app_modules, monkeypatch) -> None:
+    del app_modules
+    env_providers = importlib.import_module("app.assistant_runtime.env_providers")
+
+    assert env_providers.assistant_runtime_readiness(True) == {"kind": "codex_local", "ready": True}
+    assert env_providers.assistant_runtime_readiness(False) == {"kind": "codex_local", "ready": False}
+    _use_merge(monkeypatch)
+    assert env_providers.assistant_runtime_readiness(False) == {"kind": "merge_gateway", "ready": True}
+    _use_merge(monkeypatch, key=None)
+    assert env_providers.assistant_runtime_readiness(True) == {"kind": "merge_gateway", "ready": False}
+
+
+def test_health_reports_assistant_runtime_readiness(client, app_modules, monkeypatch) -> None:
+    del app_modules
+    _use_merge(monkeypatch)
+
+    payload = client.get("/health").json()
+
+    assert payload["media_assistant_runtime"] == "merge_gateway"
+    assert payload["media_assistant_runtime_ready"] is True
+
+
+def test_strict_response_format_inlines_refs(app_modules) -> None:
+    del app_modules
+    openai_module = importlib.import_module("app.assistant_runtime.openai_compatible")
+    kernel = importlib.import_module("app.assistant.kernel")
+
+    schema = openai_module._strict_response_format(kernel._provider_step_schema())["json_schema"]["schema"]
+
+    assert "$ref" not in json.dumps(schema)
+    assert "$defs" not in schema
+    assert schema["properties"]["capability"].get("enum")
+
+
+def test_inline_refs_leaves_cycles_unconstrained(app_modules) -> None:
+    del app_modules
+    openai_module = importlib.import_module("app.assistant_runtime.openai_compatible")
+    defs = {"Node": {"type": "object", "properties": {"child": {"$ref": "#/$defs/Node"}}}}
+
+    flat = openai_module._inline_refs({"$ref": "#/$defs/Node"}, defs)
+
+    assert flat["properties"]["child"] == {}
+
+
+def test_kernel_tool_results_are_sent_as_user_messages(app_modules) -> None:
+    del app_modules
+    openai_module = importlib.import_module("app.assistant_runtime.openai_compatible")
+
+    assert openai_module._wire_message({"role": "tool", "content": "result"}) == {"role": "user", "content": "result"}
+    assert openai_module._wire_message({"role": "assistant", "content": "x"}) == {"role": "assistant", "content": "x"}

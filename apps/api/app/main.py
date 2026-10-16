@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from . import codex_local_provider, kie_adapter, service, store
 from .assistant.provider_support import sync_active_assistant_session_providers
 from .assistant.routes import router as assistant_router
+from .assistant_runtime.env_providers import assistant_runtime_readiness
 from .control_auth import validate_control_request
 from .graph.cancellation import cancel_batch_jobs
 from .graph.registry import registry
@@ -241,6 +242,7 @@ def health() -> HealthResponse:
     )
     local_openai_ready = any(str(item.get("provider_status") or "").strip() == "connected" for item in local_openai_configs)
     codex_status = codex_local_provider.codex_local_status()
+    assistant_runtime = assistant_runtime_readiness(bool(codex_status.get("ready")))
     return HealthResponse(
         status="ok",
         app=settings.app_name,
@@ -256,6 +258,8 @@ def health() -> HealthResponse:
         codex_local_login_configured=bool(codex_status.get("login_configured")),
         codex_local_ready=bool(codex_status.get("ready")),
         media_assistant_enabled=settings.media_assistant_enabled,
+        media_assistant_runtime=assistant_runtime["kind"],
+        media_assistant_runtime_ready=assistant_runtime["ready"],
         runner_name=runner.display_name,
         runner_mode=runner.mode,
         runner_attached_to=runner.attached_to,

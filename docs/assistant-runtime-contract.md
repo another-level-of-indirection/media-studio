@@ -62,7 +62,7 @@ A thin adapter over `enhancement_provider.run_codex_local_chat` and the Codex Ap
 
 ### OpenAI-compatible (`assistant_runtime/openai_compatible.py`, experimental)
 
-For `local_openai` and `openrouter`. These endpoints are stateless, so the adapter owns the conversation (`provider_managed_state=False`):
+For `local_openai`, `openrouter` and `merge_gateway`. These endpoints are stateless, so the adapter owns the conversation (`provider_managed_state=False`):
 
 - It persists a transcript per session under `data/runtime/assistant-transcripts/<id>.json`. `provider_state` is the transcript id. The `/media/files` endpoint refuses this directory.
 - It replays the transcript on each step. A new transcript starts when instructions or the session key change.
@@ -70,7 +70,7 @@ For `local_openai` and `openrouter`. These endpoints are stateless, so the adapt
 - It normalizes the step schema for strict structured output, and accepts JSON wrapped in a code fence. Anything else is reported as a step error and is not stored.
 - Kernel steps use at least 4,000 completion tokens, because the 900-token chat default truncates plans and drafts.
 - Stop abandons the in-flight HTTP request. The request cannot be aborted, but its result is discarded.
-- Vision is off by default, so reference and output analysis are unavailable.
+- Vision is off by default (reference and output analysis are unavailable), except for `merge_gateway`.
 
 It is **disabled by default**. Enable it by listing provider kinds in `.env`, then restart the API:
 
@@ -80,13 +80,35 @@ MEDIA_ASSISTANT_EXPERIMENTAL_RUNTIMES=local_openai
 
 Then choose that provider in **Settings → AI → Media Assistant**.
 
+### Merge Gateway (`merge_gateway`, Claude)
+
+The fastest way to run the assistant on Claude. It reuses the OpenAI-compatible runtime against [Merge Gateway](https://docs.merge.dev/merge-gateway/get-started), which exposes Claude behind an OpenAI-style `/chat/completions` route. It is configured from the environment, not AI Settings:
+
+```env
+MEDIA_ASSISTANT_PROVIDER=merge_gateway
+MERGE_API_KEY=mg_...
+MERGE_MODEL=anthropic/claude-haiku-5-5
+MERGE_BASE_URL=https://api-gateway.merge.dev/v1/openai
+NEXT_PUBLIC_MEDIA_STUDIO_ASSISTANT_DEBUG=1
+```
+
+Restart the API and web app after changing them.
+
+- `MEDIA_ASSISTANT_PROVIDER` overrides the stored Media Assistant provider and registers the runtime, so `MEDIA_ASSISTANT_EXPERIMENTAL_RUNTIMES` is not needed. `MERGE_MODEL` overrides the stored model, because a stored Codex model id is meaningless here.
+- **Use `/v1/openai`.** On plain `/v1`, Merge returns strict-JSON answers as a tool call with empty `content`, which the kernel cannot read. A `MERGE_BASE_URL` ending in `/v1` is rewritten to `/v1/openai` automatically.
+- The step schema is sent with `$ref`/`$defs` inlined. With refs, Merge/Claude ignored the schema and answered in a free-form shape; inlined, the same schema is followed.
+- The kernel's `tool` result messages are sent as `user` messages. An orphan `tool` role makes Merge answer 500.
+- Vision is enabled for this kind (Claude accepts `image_url` parts). It has not been exercised live yet.
+- `/health` reports `media_assistant_runtime` and `media_assistant_runtime_ready`; the Graph Studio setup panel uses them, so it no longer asks for Codex.
+- Selecting it in the Settings UI is not supported yet; the env var is the only switch.
+
 #### Known gaps
 
-- The Graph Studio setup panel still checks `codex_local_ready` from `/health`, so the web UI will show the Codex setup message even when an experimental runtime would work. This needs a runtime-aware readiness field.
 - `resolve_assistant_provider_runtime` requires an API key for every non-Codex provider, which blocks local servers that need no key.
-- Summarizing compaction and a vision-capable configuration are not implemented.
-- The prototype has not been run against a live model. Strict JSON-schema reliability varies by endpoint and model.
-- A Claude-based runtime has not been built. See "Adding a runtime".
+- Summarizing compaction is not implemented; the oldest messages are dropped.
+- Strict JSON-schema reliability varies by endpoint and model. A two-turn conversation with a real tool call (`list_media_models`) completed on `claude-haiku-5-5`; long multi-tool turns, plans and drafts have not been measured.
+- Assistant settings in the UI still list only the stored providers (no Merge Gateway option).
+- Other providers (`local_openai`, `openrouter`) are still flag-only and show the Codex-oriented UI copy in some settings panels.
 
 ## Adding a runtime
 

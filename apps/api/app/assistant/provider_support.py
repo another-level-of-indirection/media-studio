@@ -10,13 +10,13 @@ from ..service_provider_config import (
     MEDIA_ASSISTANT_CONFIG_KEY,
     MEDIA_ASSISTANT_DEFAULT_MAX_TOKENS,
     MEDIA_ASSISTANT_DEFAULT_TEMPERATURE,
-    PROMPT_RECIPE_DRAFTING_PROVIDERS,
     shared_provider_runtime,
 )
 from ..settings import settings
 from .cancellation import AssistantSessionBusy, cancel_session, wait_for_session_idle
 from .limits import ASSISTANT_IMAGE_ATTACHMENT_LIMIT, is_image_attachment
 from ..assistant_runtime import get_assistant_runtime
+from ..assistant_runtime.env_providers import env_provider_config, resolve_provider_kind
 
 
 ASSISTANT_CHAT_DEFAULT_MAX_TOKENS = 900
@@ -47,16 +47,12 @@ def string_value(value: Any) -> str:
 
 def resolve_assistant_provider_runtime(session: Dict[str, Any]) -> AssistantProviderRuntime:
     assistant_config = store.get_prompt_recipe_drafting_config(MEDIA_ASSISTANT_CONFIG_KEY) or {}
-    requested_provider = string_value(
-        assistant_config.get("provider_kind")
-        or session.get("provider_kind")
-        or "codex_local"
-    )
-    if requested_provider not in PROMPT_RECIPE_DRAFTING_PROVIDERS:
-        requested_provider = "codex_local"
+    requested_provider = resolve_provider_kind(assistant_config.get("provider_kind"), session.get("provider_kind"))
+    env_config = env_provider_config(requested_provider)
 
     provider_model_id = (
-        string_value(assistant_config.get("provider_model_id"))
+        (env_config.model if env_config else None)
+        or string_value(assistant_config.get("provider_model_id"))
         or string_value(session.get("provider_model_id"))
     )
     if requested_provider == "codex_local" and not provider_model_id:
@@ -65,7 +61,7 @@ def resolve_assistant_provider_runtime(session: Dict[str, Any]) -> AssistantProv
         raise AssistantProviderConfigurationError(f"Choose a {requested_provider} model in AI Settings before using assistant chat.")
 
     try:
-        runtime = shared_provider_runtime(
+        runtime = env_config.as_runtime() if env_config else shared_provider_runtime(
             requested_provider,
             stored_base_url=string_value(assistant_config.get("provider_base_url")) or None,
             allow_feature_config=False,
@@ -96,15 +92,11 @@ def resolve_assistant_provider_runtime(session: Dict[str, Any]) -> AssistantProv
 
 def configured_assistant_provider(session: Dict[str, Any]) -> tuple[str, Optional[str]]:
     config = store.get_prompt_recipe_drafting_config(MEDIA_ASSISTANT_CONFIG_KEY) or {}
-    provider_kind = string_value(
-        config.get("provider_kind")
-        or session.get("provider_kind")
-        or "codex_local"
-    )
-    if provider_kind not in PROMPT_RECIPE_DRAFTING_PROVIDERS:
-        provider_kind = "codex_local"
+    provider_kind = resolve_provider_kind(config.get("provider_kind"), session.get("provider_kind"))
+    env_config = env_provider_config(provider_kind)
     provider_model_id = (
-        string_value(config.get("provider_model_id"))
+        (env_config.model if env_config else None)
+        or string_value(config.get("provider_model_id"))
         or string_value(session.get("provider_model_id"))
         or None
     )

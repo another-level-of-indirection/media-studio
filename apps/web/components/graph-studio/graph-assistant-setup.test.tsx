@@ -41,6 +41,7 @@ describe("Media Assistant setup entry", () => {
     [{ ...ready, codex_local_ready: false, codex_local_command_available: false }, "Install Codex to use Media Assistant"],
     [{ ...ready, codex_local_ready: false, codex_local_login_configured: false }, "Sign in to Codex"],
     [{ ...ready, codex_local_ready: false }, "Codex Local is not ready"],
+    [{ ...ready, codex_local_ready: true, media_assistant_runtime: "merge_gateway", media_assistant_runtime_ready: false }, "Media Assistant provider is not ready"],
   ])("explains the health blocker and only makes a readiness request", async (health, title) => {
     vi.stubEnv("NEXT_PUBLIC_MEDIA_STUDIO_ASSISTANT_DEBUG", "1");
     const fetchMock = vi.fn().mockResolvedValue(healthResponse(health));

@@ -10,6 +10,7 @@ const SETUP_STATUS = {
   missing: ["Install Codex to use Media Assistant", "Codex was not found on the machine running Media Studio. Install it and sign in, then check again."],
   signed_out: ["Sign in to Codex", "Codex is installed, but no local sign-in was found. Run codex in a terminal on the machine running Media Studio and complete sign-in."],
   unready: ["Codex Local is not ready", "Media Studio could not confirm a working Codex connection. Review Codex Local in AI Settings, then check again."],
+  runtime_unready: ["Media Assistant provider is not ready", "The configured provider (MEDIA_ASSISTANT_PROVIDER) is missing its API key, model or endpoint. Check the MERGE_* values in this installation’s environment, then restart the API and check again."],
   error: ["Could not check Media Assistant", "The Media Studio health check failed. Confirm the app is running, then check again."],
 } satisfies Record<Exclude<GraphAssistantAvailability, "ready">, readonly [string, string]>;
 
@@ -35,7 +36,7 @@ export function GraphAssistantSetup({ status, bottomOffset, onCheckAgain, onClos
           <div className="graph-assistant-readiness" role="status">
             <strong>{title}</strong>
             <span>{detail}</span>
-            <span>Media Assistant requires Codex Local on the machine running Media Studio. Media Studio starts its runtime automatically once it is set up.</span>
+            {status !== "runtime_unready" && <span>Media Assistant requires Codex Local on the machine running Media Studio. Media Studio starts its runtime automatically once it is set up.</span>}
             <a href="/setup">Open Setup</a>
             <a href="/settings/llms">AI Settings</a>
           </div>

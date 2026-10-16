@@ -89,6 +89,10 @@ class AppSettings(BaseModel):
     media_studio_public_api_base_url: Optional[str] = None
     media_assistant_enabled: bool = False
     media_assistant_experimental_runtimes: tuple[str, ...] = ()
+    media_assistant_provider: Optional[str] = None
+    merge_api_key: Optional[str] = None
+    merge_base_url: str = "https://api-gateway.merge.dev/v1/openai"
+    merge_model: Optional[str] = None
     control_api_token: str = "media-studio-local-control-token"
     kie_api_key: Optional[str] = None
     openrouter_api_key: Optional[str] = None
@@ -149,6 +153,10 @@ settings = AppSettings(
         for item in os.getenv("MEDIA_ASSISTANT_EXPERIMENTAL_RUNTIMES", "").split(",")
         if item.strip()
     ),
+    media_assistant_provider=os.getenv("MEDIA_ASSISTANT_PROVIDER", "").strip() or None,
+    merge_api_key=os.getenv("MERGE_API_KEY") or None,
+    merge_base_url=os.getenv("MERGE_BASE_URL", "").strip() or "https://api-gateway.merge.dev/v1/openai",
+    merge_model=os.getenv("MERGE_MODEL", "").strip() or None,
     control_api_token=_resolve_control_api_token(_env_str("MEDIA_STUDIO_APP_ENV", "development")),
     kie_api_key=os.getenv("KIE_API_KEY"),
     openrouter_api_key=os.getenv("OPENROUTER_API_KEY"),

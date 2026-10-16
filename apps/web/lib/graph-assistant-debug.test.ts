@@ -67,4 +67,23 @@ describe("isGraphAssistantAvailable", () => {
       }),
     ).toBe(true);
   });
+
+  it("uses the runtime readiness reported by the API when present", () => {
+    process.env.NEXT_PUBLIC_MEDIA_STUDIO_ASSISTANT_DEBUG = "1";
+
+    expect(
+      isGraphAssistantAvailable({
+        media_assistant_enabled: true,
+        codex_local_ready: false,
+        media_assistant_runtime_ready: true,
+      }),
+    ).toBe(true);
+    expect(
+      isGraphAssistantAvailable({
+        media_assistant_enabled: true,
+        codex_local_ready: true,
+        media_assistant_runtime_ready: false,
+      }),
+    ).toBe(false);
+  });
 });

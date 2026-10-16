@@ -7,12 +7,15 @@ step, and trims it when asked to compact. The kernel is unchanged; it keeps
 sending deltas and persisting ``provider_state`` (here a transcript id).
 
 Disabled unless ``MEDIA_ASSISTANT_EXPERIMENTAL_RUNTIMES`` lists the provider
-kind (for example ``local_openai`` or ``openrouter``). Known limits:
+kind (for example ``local_openai`` or ``openrouter``). ``merge_gateway`` is
+enabled by ``MEDIA_ASSISTANT_PROVIDER=merge_gateway`` and configured from the
+``MERGE_*`` environment (see ``env_providers``). Known limits:
 
 * Compaction drops the oldest messages instead of summarizing them.
 * Strict JSON-schema output depends on the endpoint/model; invalid JSON is
   reported as a step error rather than repaired.
-* Vision is off by default because many local models are text-only.
+* Vision is off by default because many local models are text-only; it is on
+  for ``merge_gateway`` (Claude).
 * Cancellation abandons the in-flight HTTP request (it cannot be aborted).
 """
 
@@ -28,6 +31,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from .. import codex_local_provider, enhancement_provider
 from ..settings import settings
 from ..store_support import new_id
+from .env_providers import VISION_PROVIDER_KINDS, selected_env_provider
 from . import (
     RuntimeCapabilities,
     RuntimeInterrupted,
@@ -37,7 +41,7 @@ from . import (
     register_runtime,
 )
 
-SUPPORTED_KINDS = ("local_openai", "openrouter")
+SUPPORTED_KINDS = ("local_openai", "openrouter", "merge_gateway")
 _STATE_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _FENCE = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.DOTALL)
 
@@ -79,6 +83,36 @@ def _run_cancellable(
     return box["value"]
 
 
+def _wire_message(message: Dict[str, Any]) -> Dict[str, Any]:
+    """The kernel's ``tool`` messages are plain results, not OpenAI tool calls.
+
+    A ``tool`` message with no preceding ``tool_calls`` is invalid on the wire
+    (Merge Gateway answers 500), so send it as a user message. The content is
+    already labelled as an untrusted tool result by the kernel.
+    """
+    return {**message, "role": "user"} if message.get("role") == "tool" else message
+
+
+def _inline_refs(node: Any, defs: Dict[str, Any], stack: Tuple[str, ...] = ()) -> Any:
+    """Replace ``$ref`` with the referenced definition.
+
+    Some gateways (Merge Gateway to Claude) silently ignore a schema that uses
+    ``$defs``/``$ref`` and answer in a free-form shape. A cyclic reference is
+    left unconstrained rather than expanded forever.
+    """
+    if isinstance(node, dict):
+        ref = node.get("$ref")
+        if isinstance(ref, str):
+            name = ref.rsplit("/", 1)[-1]
+            if name in stack or name not in defs:
+                return {}
+            return _inline_refs(defs[name], defs, (*stack, name))
+        return {key: _inline_refs(value, defs, stack) for key, value in node.items() if key != "$defs"}
+    if isinstance(node, list):
+        return [_inline_refs(item, defs, stack) for item in node]
+    return node
+
+
 def _strict_response_format(response_format: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """Normalize a Pydantic JSON schema for strict structured-output endpoints.
 
@@ -91,11 +125,12 @@ def _strict_response_format(response_format: Optional[Dict[str, Any]]) -> Option
     schema = payload.get("schema") if isinstance(payload, dict) else None
     if not isinstance(schema, dict):
         return response_format
+    normalized = codex_local_provider._normalize_strict_json_schema(schema)
     return {
         **response_format,
         "json_schema": {
             **payload,
-            "schema": codex_local_provider._normalize_strict_json_schema(schema),
+            "schema": _inline_refs(normalized, normalized.get("$defs") or {}),
         },
     }
 
@@ -221,8 +256,7 @@ class OpenAICompatibleRuntime:
                     request.on_compaction(False)
         outbound = [
             *(self._instruction_messages(transcript["instructions"]) if stateful else []),
-            *history,
-            *request.messages,
+            *(_wire_message(message) for message in (*history, *request.messages)),
         ]
         max_tokens = max(int(request.connection.max_tokens or 0), self.STEP_MIN_MAX_TOKENS)
         result = _run_cancellable(
@@ -290,7 +324,9 @@ class OpenAICompatibleRuntime:
 def register_experimental_runtimes(kinds: Optional[Tuple[str, ...]] = None) -> None:
     """Register flagged runtimes. Idempotent; unknown kinds are ignored."""
     enabled = settings.media_assistant_experimental_runtimes if kinds is None else kinds
+    if kinds is None and selected_env_provider():
+        enabled = (*enabled, selected_env_provider())
     registered = get_registered_kinds()
     for kind in enabled:
         if kind in SUPPORTED_KINDS and kind not in registered:
-            register_runtime(OpenAICompatibleRuntime(kind))
+            register_runtime(OpenAICompatibleRuntime(kind, vision=kind in VISION_PROVIDER_KINDS))
