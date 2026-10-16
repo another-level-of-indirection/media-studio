@@ -220,6 +220,16 @@ test("evaluateMechanicalTurn rejects banned vocabulary and lifecycle regressions
   assert.equal(evaluateMechanicalTurn(duplicateSpawn).process_lifecycle.pass, false);
 });
 
+test("evaluateMechanicalTurn accepts client-managed runtimes that spawn no process", () => {
+  const clientManaged = passingMechanicalFixture();
+  for (const step of clientManaged.contentJson.kernel_turn.trace.provider_steps) {
+    step.process_lifecycle = "no_process";
+  }
+  clientManaged.contentJson.assistant_turn_trace.provider_process_spawns = 0;
+
+  assert.equal(evaluateMechanicalTurn(clientManaged).process_lifecycle.pass, true);
+});
+
 test("evaluateMechanicalTurn rejects step-budget and unconfirmed-mutation regressions", () => {
   const exhausted = passingMechanicalFixture();
   exhausted.contentJson.kernel_turn.trace.step_count = 7;

@@ -189,7 +189,7 @@ export function evaluateMechanicalTurn({
     && providerSteps.every(
       (step) => typeof step?.provider_thread_id === "string"
         && step.provider_thread_id.length > 0
-        && ["process_spawned", "process_reused"].includes(step.process_lifecycle),
+        && ["process_spawned", "process_reused", "no_process"].includes(step.process_lifecycle),
     )
     && processSpawns <= 1
     && (

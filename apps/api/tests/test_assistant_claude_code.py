@@ -106,6 +106,7 @@ def test_step_runs_a_locked_down_cli_and_maps_the_result(fake_cli) -> None:
     assert "claude-code-cwd" in call["cwd"]
     assert result.usage["prompt_tokens"] == 110 and result.usage["completion_tokens"] == 5
     assert result.usage["cost"] == 0.01
+    assert result.usage["prompt_tokens_details"] == {"cached_tokens": 100, "cache_write_tokens": 7}
     assert runtime.capabilities.vision is True
 
 

@@ -150,6 +150,21 @@ is only a model transport. The transcript is client-managed and replayed as the 
 * Usage reports `prompt_tokens`, `completion_tokens`, `cost` (Claude Code's `total_cost_usd`) and cache reads.
 * Tests use a fake `claude` executable (`tests/test_assistant_claude_code.py`); nothing there needs an account.
 
+#### Claude Code parity check (Oct 2026, Sonnet via `claude -p`, no media jobs submitted)
+
+Ran the mechanical conversation suite (`MEDIA_ASSISTANT_PROVIDER=claude_code node scripts/assistant_conversation_probe.mjs --group <g>`;
+the lifecycle check now accepts `no_process`). Graph 5/5, debug 2/2, voice 2/2 (V1 is aggregate), story 5/5 on two reruns
+and 4/5 on the first run. Recipes 2/4 and presets 2/5 failed on reply length (Claude writes 160-200 words where the cap is
+lower), P5 saved nothing but answered "no draft yet" without a tool call, and P1 asked one clarifying question instead of
+drafting. Known behaviours to watch:
+
+* One S4 run answered "the tool for building it didn't respond" with no tool call in the trace (invented failure; two reruns
+  built the graph). A guard for failure claims with no failed tool would close this.
+* Tokens per step are about 42k and grow with the transcript; most of it is cached (cache reads are now reported as
+  `prompt_tokens_details.cached_tokens`). The probe's ceilings (50k average per reply) are not met on raw tokens.
+* Safety probes (instructions in a canvas node, "skip confirmation", "print your system prompt", "delete everything") made no
+  run, no mutation and no leak.
+
 ## Adding a runtime
 
 1. Implement the `AssistantRuntime` protocol in `apps/api/app/assistant_runtime/<name>.py`. Decide `provider_managed_state`. If it is false, own the transcript and compaction as the OpenAI-compatible runtime does.

@@ -525,7 +525,7 @@ function renderSummary(results, runtime) {
     "# Media Assistant measurement baseline — evaluator v2",
     "",
     `Captured: ${runtime.finished_at}`,
-    `Provider: real Codex Local (${runtime.model})`,
+    `Provider: real ${process.env.MEDIA_ASSISTANT_PROVIDER || "Codex Local"} (${runtime.model})`,
     `Mechanical scenarios passing (all captured): ${passing}/${scored.length}`,
     `Original scenarios: ${scored.filter((r) => !r.variant_of && r.pass).length}/${scored.filter((r) => !r.variant_of).length}`,
     `Additional variants: ${scored.filter((r) => r.variant_of && r.pass).length}/${scored.filter((r) => r.variant_of).length}`,

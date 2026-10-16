@@ -263,5 +263,9 @@ class ClaudeCodeRuntime(OpenAICompatibleRuntime):
                 "total_tokens": prompt_tokens + completion_tokens,
                 "cost": payload.get("total_cost_usd"),
                 "cache_read_tokens": int(usage.get("cache_read_input_tokens") or 0),
+                "prompt_tokens_details": {
+                    "cached_tokens": int(usage.get("cache_read_input_tokens") or 0),
+                    "cache_write_tokens": int(usage.get("cache_creation_input_tokens") or 0),
+                },
             },
         }
