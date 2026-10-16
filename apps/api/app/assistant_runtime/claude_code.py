@@ -13,7 +13,7 @@ failed steps behaving the same as the other runtimes. Known limits:
 
 * Sign-in is Claude Code's own (``claude auth login``); an expired OAuth
   session fails the step with a clear message and shows as "not ready".
-* No vision: images cannot be passed through the text prompt.
+* Images are sent as content blocks over `--input-format stream-json`, so no file-reading tool is enabled.
 * Claude Code adds its own small preamble to every request.
 * Stop kills the process, so provider-side generation does stop.
 """
@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -90,16 +91,23 @@ def _text_of(content: Any) -> str:
     if isinstance(content, str):
         return content
     if isinstance(content, list):
-        parts = []
-        for part in content:
-            if not isinstance(part, dict):
-                continue
-            if part.get("type") == "text":
-                parts.append(str(part.get("text") or ""))
-            elif part.get("type") == "image_url":
-                parts.append("[image omitted: this runtime has no vision]")
-        return "\n".join(parts)
+        return "\n".join(str(part.get("text") or "") for part in content if isinstance(part, dict) and part.get("type") == "text")
     return "" if content is None else str(content)
+
+
+_DATA_URL = re.compile(r"^data:(image/[A-Za-z0-9.+-]+);base64,(.+)$", re.DOTALL)
+
+
+def _image_block(part: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """An OpenAI ``image_url`` part as a Claude image block (data URL or plain URL)."""
+    image = part.get("image_url")
+    url = str(image.get("url") if isinstance(image, dict) else image or "")
+    matched = _DATA_URL.match(url)
+    if matched:
+        return {"type": "image", "source": {"type": "base64", "media_type": matched.group(1), "data": matched.group(2)}}
+    if url.startswith(("http://", "https://")):
+        return {"type": "image", "source": {"type": "url", "url": url}}
+    return None
 
 
 def split_instructions(messages: List[Dict[str, Any]]) -> tuple[str, List[Dict[str, Any]]]:
@@ -107,13 +115,44 @@ def split_instructions(messages: List[Dict[str, Any]]) -> tuple[str, List[Dict[s
     return "\n\n".join(part for part in instructions if part), [m for m in messages if m.get("role") != "system"]
 
 
-def render_prompt(instructions: str, turns: List[Dict[str, Any]]) -> str:
-    """The transcript plus the cue for the next step (instructions only when not sent as the system prompt)."""
-    lines = [instructions, "", "=== CONVERSATION SO FAR ==="] if instructions else ["=== CONVERSATION SO FAR ==="]
+def render_blocks(instructions: str, turns: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """One user message: the transcript with images in place, then the cue for the next step.
+
+    ``instructions`` is only passed when they do not fit in ``--system-prompt``.
+    Images ride as content blocks over ``--input-format stream-json``, so no
+    file-reading tool needs to be enabled.
+    """
+    blocks: List[Dict[str, Any]] = []
+
+    def text(value: str) -> None:
+        if blocks and blocks[-1]["type"] == "text":
+            blocks[-1]["text"] += "\n" + value
+        else:
+            blocks.append({"type": "text", "text": value})
+
+    if instructions:
+        text(instructions + "\n")
+    text("=== CONVERSATION SO FAR ===")
     for message in turns:
-        lines += [f"[{message.get('role') or 'user'}]", _text_of(message.get("content")), ""]
-    lines.append("=== END ===\nWrite the next assistant message now, as the JSON the schema requires.")
-    return "\n".join(lines)
+        text(f"[{message.get('role') or 'user'}]")
+        content = message.get("content")
+        if isinstance(content, list):
+            for part in content:
+                if not isinstance(part, dict):
+                    continue
+                if part.get("type") == "text":
+                    text(str(part.get("text") or ""))
+                elif part.get("type") == "image_url":
+                    block = _image_block(part)
+                    if block:
+                        blocks.append(block)
+                    else:
+                        text("[image could not be attached]")
+        else:
+            text(_text_of(content))
+        text("")
+    text("=== END ===\nWrite the next assistant message now, as the JSON the schema requires.")
+    return blocks
 
 
 def _failure(result: Dict[str, Any]) -> enhancement_provider.EnhancementProviderError:
@@ -128,15 +167,18 @@ def _failure(result: Dict[str, Any]) -> enhancement_provider.EnhancementProvider
 
 
 def _parse_output(stdout: str) -> Dict[str, Any]:
-    try:
-        payload = json.loads(stdout)
-    except ValueError as exc:
-        raise enhancement_provider.EnhancementProviderError("Claude Code did not return JSON.") from exc
-    if isinstance(payload, list):  # some versions emit the event list
-        payload = next((item for item in reversed(payload) if isinstance(item, dict) and item.get("type") == "result"), {})
-    if not isinstance(payload, dict):
+    """The ``result`` event from ``--output-format stream-json`` (one JSON object per line)."""
+    result: Optional[Dict[str, Any]] = None
+    for line in stdout.splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(event, dict) and event.get("type") == "result":
+            result = event
+    if result is None:
         raise enhancement_provider.EnhancementProviderError("Claude Code did not return a result.")
-    return payload
+    return result
 
 
 def _run_cli(
@@ -179,7 +221,7 @@ class ClaudeCodeRuntime(OpenAICompatibleRuntime):
     endpoint_required = False
 
     def __init__(self, kind: str = "claude_code") -> None:
-        super().__init__(kind, vision=False, strip_constraints=True)
+        super().__init__(kind, vision=True, strip_constraints=True)
 
     def _complete(self, request: StepRequest, outbound: List[Dict[str, Any]], base_url: str) -> Dict[str, Any]:
         binary = claude_binary()
@@ -188,7 +230,8 @@ class ClaudeCodeRuntime(OpenAICompatibleRuntime):
                 "Claude Code was not found. Install it or set CLAUDE_CODE_BIN."
             )
         command = [
-            binary, "-p", "--output-format", "json", "--no-session-persistence",
+            binary, "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
+            "--no-session-persistence",
             "--tools", "", "--restricted", "--strict-mcp-config", "--disable-slash-commands",
             "--model", request.model_id,
         ]
@@ -198,7 +241,8 @@ class ClaudeCodeRuntime(OpenAICompatibleRuntime):
         schema = _strict_response_format(request.response_schema, strip_constraints=True)
         if schema:
             command += ["--json-schema", json.dumps(schema["json_schema"]["schema"], separators=(",", ":"))]
-        prompt = render_prompt("" if as_argument else instructions, turns)
+        blocks = render_blocks("" if as_argument else instructions, turns)
+        prompt = json.dumps({"type": "user", "message": {"role": "user", "content": blocks}}) + "\n"
         payload = call_with_retries(
             lambda: _run_cli(
                 command, prompt, cwd=_scratch_dir(), cancel_event=request.cancel_event,
