@@ -73,8 +73,8 @@ def _openrouter_headers(api_key: str) -> Dict[str, str]:
     }
 
 
-def _http_client() -> httpx.Client:
-    return httpx.Client(timeout=ENHANCEMENT_HTTP_TIMEOUT_SECONDS, follow_redirects=True)
+def _http_client(timeout: Optional[float] = None) -> httpx.Client:
+    return httpx.Client(timeout=timeout or ENHANCEMENT_HTTP_TIMEOUT_SECONDS, follow_redirects=True)
 
 
 def _normalize_enhancement_prompt(text: Optional[str]) -> str:
@@ -425,11 +425,14 @@ def run_openai_compatible_chat(
     max_tokens: Optional[int] = None,
     response_format: Optional[Dict[str, Any]] = None,
     error_context: str = "request",
+    extra_body: Optional[Dict[str, Any]] = None,
+    timeout: Optional[float] = None,
 ) -> Dict[str, Any]:
     endpoint = f"{base_url.rstrip('/')}/chat/completions"
     request_body = {
         "model": model_id,
         "messages": messages,
+        **(extra_body or {}),
     }
     if temperature is not None:
         request_body["temperature"] = temperature
@@ -439,7 +442,7 @@ def run_openai_compatible_chat(
         request_body["response_format"] = response_format
     if provider_kind == "openrouter":
         request_body["reasoning"] = {"effort": "none", "exclude": True}
-    with _http_client() as client:
+    with _http_client(timeout) as client:
         response = client.post(endpoint, headers=_openai_compatible_headers(api_key), json=request_body)
     if response.status_code >= 400:
         failure = EnhancementProviderError(f"{provider_kind} {error_context} failed with {response.status_code}.")

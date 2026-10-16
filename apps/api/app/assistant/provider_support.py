@@ -68,7 +68,7 @@ def resolve_assistant_provider_runtime(session: Dict[str, Any]) -> AssistantProv
         )
     except ServiceError as exc:
         raise AssistantProviderConfigurationError(str(exc)) from exc
-    if requested_provider != "codex_local" and not string_value(runtime.get("api_key")):
+    if requested_provider != "codex_local" and not string_value(runtime.get("api_key")) and not (env_config and not env_config.key_required):
         raise AssistantProviderConfigurationError(
             f"{requested_provider} is missing a credential. Configure it in AI Settings or the server environment."
         )

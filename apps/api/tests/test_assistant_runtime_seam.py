@@ -709,7 +709,7 @@ def _stream_to(monkeypatch, chunks, status=200, on_chunk=None):
 
     body = Body()
     transport = httpx.MockTransport(lambda request: httpx.Response(status, stream=body))
-    monkeypatch.setattr(ep, "_http_client", lambda: httpx.Client(transport=transport))
+    monkeypatch.setattr(ep, "_http_client", lambda timeout=None: httpx.Client(transport=transport))
     return body
 
 
@@ -793,3 +793,62 @@ def test_runtime_streams_only_when_enabled(app_modules, monkeypatch) -> None:
     assert runtime_module.get_assistant_runtime("local_openai").stream is True
     assert runtime_module.get_assistant_runtime("local_openai").run_step(request).text == '{"reply":"s"}'
     assert module.OpenAICompatibleRuntime("local_openai").stream is False
+
+
+# -- MTPLX (local, keyless) --------------------------------------------------
+def _use_mtplx(monkeypatch, **overrides):
+    settings_module = importlib.import_module("app.settings")
+    values = {
+        "media_assistant_provider": "mtplx",
+        "mtplx_base_url": "http://127.0.0.1:8000/v1/",
+        "mtplx_model": "mtplx",
+        "mtplx_thinking": False,
+        "merge_api_key": None,
+    }
+    values.update(overrides)
+    for name, value in values.items():
+        monkeypatch.setattr(settings_module.settings, name, value, raising=False)
+
+
+def test_mtplx_needs_no_api_key(app_modules, monkeypatch) -> None:
+    del app_modules
+    _use_mtplx(monkeypatch)
+    support = importlib.import_module("app.assistant.provider_support")
+    env_providers = importlib.import_module("app.assistant_runtime.env_providers")
+
+    resolved = support.resolve_assistant_provider_runtime({"provider_kind": "codex_local", "provider_model_id": "gpt-x"})
+
+    assert (resolved.provider_kind, resolved.provider_model_id) == ("mtplx", "mtplx")
+    assert resolved.provider_base_url == "http://127.0.0.1:8000/v1"
+    assert resolved.api_key is None
+    assert env_providers.assistant_runtime_readiness(False) == {"kind": "mtplx", "ready": True}
+
+
+def test_merge_gateway_still_requires_a_key(app_modules, monkeypatch) -> None:
+    del app_modules
+    _use_merge(monkeypatch, key=None)
+    support = importlib.import_module("app.assistant.provider_support")
+
+    with pytest.raises(support.AssistantProviderConfigurationError):
+        support.resolve_assistant_provider_runtime({})
+
+
+def test_mtplx_runtime_is_vision_capable_and_sends_thinking_off_with_a_long_timeout(openai_runtime, monkeypatch) -> None:
+    _use_mtplx(monkeypatch)
+    runtime = openai_runtime.runtime_module.get_assistant_runtime("mtplx")
+
+    runtime.run_step(_request(openai_runtime, session_key="m:0"))
+
+    sent = openai_runtime.captured[-1]
+    assert runtime.capabilities.vision is True
+    assert sent["extra_body"] == {"chat_template_kwargs": {"enable_thinking": False}}
+    assert sent["timeout"] == 900.0
+    assert sent["provider_kind"] == "mtplx"
+
+
+def test_mtplx_thinking_can_be_enabled(app_modules, monkeypatch) -> None:
+    del app_modules
+    _use_mtplx(monkeypatch, mtplx_thinking=True)
+    env_providers = importlib.import_module("app.assistant_runtime.env_providers")
+
+    assert env_providers.env_provider_config("mtplx").extra_body == {"chat_template_kwargs": {"enable_thinking": True}}

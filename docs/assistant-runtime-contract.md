@@ -103,6 +103,24 @@ Restart the API and web app after changing them.
 - `/health` reports `media_assistant_runtime` and `media_assistant_runtime_ready`; the Graph Studio setup panel uses them, so it no longer asks for Codex.
 - Selecting it in the Settings UI is not supported yet; the env var is the only switch.
 
+### MTPLX (`mtplx`, local Qwen on Apple Silicon)
+
+Runs the assistant on a model served by [MTPLX](https://mtplx.com) on this Mac. Same OpenAI-compatible runtime, no API key.
+
+```env
+MEDIA_ASSISTANT_PROVIDER=mtplx
+MTPLX_BASE_URL=http://127.0.0.1:8000/v1
+MTPLX_MODEL=mtplx
+MTPLX_THINKING=
+```
+
+- MTPLX answers with whichever model is loaded, whatever name the request carries. `MTPLX_MODEL` is just a label.
+- Thinking is **off** by default (`chat_template_kwargs.enable_thinking=false`) so steps stay short. Set `MTPLX_THINKING=1` to let the model think first; its reasoning arrives in `reasoning_content` and is ignored.
+- The provider timeout is 900 s, because a cold 23k-token prompt takes about 4 minutes to prefill.
+- Vision is enabled (the server accepts PNG, JPEG and WebP).
+- MTPLX keeps a prefix cache. A warm turn takes 5-60 s; a turn whose prefix was evicted takes 250-300 s.
+- See `assistant-claude-improvement-plan.md` for how Qwen 3.8 27B compared with Claude Sonnet.
+
 #### Known gaps
 
 - `resolve_assistant_provider_runtime` requires an API key for every non-Codex provider, which blocks local servers that need no key.

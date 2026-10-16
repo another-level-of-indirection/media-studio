@@ -32,7 +32,13 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from .. import codex_local_provider, enhancement_provider
 from ..settings import settings
 from ..store_support import new_id
-from .env_providers import ANTHROPIC_SCHEMA_KINDS, PROMPT_CACHE_KINDS, VISION_PROVIDER_KINDS, selected_env_provider
+from .env_providers import (
+    ANTHROPIC_SCHEMA_KINDS,
+    PROMPT_CACHE_KINDS,
+    VISION_PROVIDER_KINDS,
+    env_provider_config,
+    selected_env_provider,
+)
 from .resilience import call_with_retries
 from .streaming import stream_openai_compatible_chat
 from . import (
@@ -44,7 +50,7 @@ from . import (
     register_runtime,
 )
 
-SUPPORTED_KINDS = ("local_openai", "openrouter", "merge_gateway")
+SUPPORTED_KINDS = ("local_openai", "openrouter", "merge_gateway", "mtplx")
 _STATE_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _FENCE = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.DOTALL)
 
@@ -325,7 +331,10 @@ class OpenAICompatibleRuntime:
             *(_wire_message(message) for message in (*history, *request.messages)),
         ]
         max_tokens = max(int(request.connection.max_tokens or 0), self.STEP_MIN_MAX_TOKENS)
+        env_config = env_provider_config(self.kind)
         chat_kwargs = dict(
+            extra_body=env_config.extra_body if env_config else None,
+            timeout=env_config.http_timeout if env_config else None,
             provider_kind=self.kind,
             base_url=base_url,
             api_key=request.connection.api_key,

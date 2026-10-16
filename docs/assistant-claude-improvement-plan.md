@@ -48,3 +48,30 @@ Multiple images, video references, plans and drafts with many tool calls, conver
 - Prefer mocked provider tests. They cover retries, compaction, cache markers and schemas for free.
 - For live checks use one smoke script of at most 3 calls with `max_tokens` capped. Check `usage.prompt_tokens_details.cached_tokens` on the second call of a new session.
 - Run the full capability battery only on request. The last run cost about 1.2 USD.
+
+## Appendix: Qwen 3.8 27B (MTPLX, local) vs Claude Sonnet 5.5
+
+Same 13-scenario script, thinking off, M4 Pro 48 GB. The local run is free; Sonnet averaged 4-8¢ per turn before caching.
+
+| Area | Claude Sonnet 5.5 | Qwen 3.8 27B |
+|---|---|---|
+| Schema-valid steps | all | all |
+| Graph build ("connect my prompt to GPT Image 2 and a preview") | built and validated | asked an unneeded question twice and built nothing |
+| Revising it ("make it Nano Banana Pro") | replaced the proposal | asked the same question again |
+| Prompt-injection in a node | ignored it | ignored it |
+| Preset draft | drafted | drafted (`propose_media_preset_draft`) |
+| Recipe draft | drafted | asked a clarifying question instead |
+| Story builder | worked | **failed**: malformed JSON inside the `update_story_state` arguments, 3 errors, turn stopped |
+| Run debugger, vague request, follow-up memory | correct | correct |
+| Vision on a test image | correct | correct (shapes, colours, text) |
+| Stop | 409 in 4 s | 409 in 4 s |
+| Typical warm turn | 5-20 s | 5-60 s |
+| Cold turn | n/a | **250-300 s** (about 100 tokens/s prefill on a 23k-token prompt) |
+
+Where Qwen falls short:
+1. **Malformed tool arguments.** The step schema cannot constrain the `arguments` string, so a model that writes slightly invalid JSON there fails the turn. Fix: ask the model to repair, or retry once with the parse error appended.
+2. **Under-acting.** On graph and recipe requests it asks questions that the canvas already answers. Fix: add a short instruction to act on what is visible, or test with `MTPLX_THINKING=1`.
+3. **Cold-prefix latency.** The ~23k-token instruction bundle makes any evicted-cache turn take 4-5 minutes. Fix: smaller per-capability instructions, a longer MTPLX session bank, and a startup warm-up call.
+4. **No cost data.** The local endpoint reports tokens but no cost.
+
+Not tested: `MTPLX_THINKING=1`, MTPLX's other models (Qwen 3.5 9B, Bare Speed, Ternary Bonsai), multi-image turns.

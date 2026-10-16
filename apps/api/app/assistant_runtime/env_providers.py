@@ -1,8 +1,9 @@
-"""Environment-configured assistant providers (currently Merge Gateway).
+"""Environment-configured assistant providers: Merge Gateway and MTPLX.
 
 These providers are not stored in AI Settings. They are selected with
 ``MEDIA_ASSISTANT_PROVIDER`` and configured with ``MERGE_API_KEY``,
-``MERGE_MODEL`` and ``MERGE_BASE_URL``. The environment wins over any stored
+``MERGE_MODEL`` and ``MERGE_BASE_URL`` (Merge) or ``MTPLX_BASE_URL``,
+``MTPLX_MODEL`` and ``MTPLX_THINKING`` (a local MTPLX server, no key). The environment wins over any stored
 Media Assistant model, because a stored Codex model id is meaningless to them.
 """
 
@@ -13,8 +14,8 @@ from typing import Any, Dict, Optional
 
 from ..settings import settings
 
-ENV_PROVIDER_KINDS = ("merge_gateway",)
-VISION_PROVIDER_KINDS = ("merge_gateway",)  # Claude accepts OpenAI-style image_url parts.
+ENV_PROVIDER_KINDS = ("merge_gateway", "mtplx")
+VISION_PROVIDER_KINDS = ("merge_gateway", "mtplx")  # both accept OpenAI-style image_url parts.
 PROMPT_CACHE_KINDS = ("merge_gateway",)  # Anthropic caches only prefixes ending at a cache_control marker.
 ANTHROPIC_SCHEMA_KINDS = ("merge_gateway",)  # Anthropic structured output rejects size/range keywords.
 
@@ -24,6 +25,9 @@ class EnvProviderConfig:
     base_url: str
     api_key: Optional[str]
     model: Optional[str]
+    key_required: bool = True
+    extra_body: Optional[Dict[str, Any]] = None  # merged into every request body
+    http_timeout: Optional[float] = None  # seconds; None keeps the default
 
     def as_runtime(self) -> Dict[str, Any]:
         return {"base_url": self.base_url, "api_key": self.api_key, "credential_source": "environment"}
@@ -46,6 +50,16 @@ def normalize_merge_base_url(value: Optional[str]) -> str:
 
 
 def env_provider_config(kind: Optional[str]) -> Optional[EnvProviderConfig]:
+    if kind == "mtplx":
+        # Local server: no key, and a 27B model can take minutes to prefill a long prompt.
+        return EnvProviderConfig(
+            base_url=(settings.mtplx_base_url or "").strip().rstrip("/"),
+            api_key=None,
+            model=(settings.mtplx_model or "").strip() or "mtplx",
+            key_required=False,
+            extra_body={"chat_template_kwargs": {"enable_thinking": bool(settings.mtplx_thinking)}},
+            http_timeout=900.0,
+        )
     if kind != "merge_gateway":
         return None
     return EnvProviderConfig(

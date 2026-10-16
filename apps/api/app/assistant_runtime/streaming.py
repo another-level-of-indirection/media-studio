@@ -36,6 +36,8 @@ def stream_openai_compatible_chat(
     response_format: Optional[Dict[str, Any]] = None,
     error_context: str = "request",
     cancel_event: Optional[Any] = None,
+    extra_body: Optional[Dict[str, Any]] = None,
+    timeout: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Same result shape as ``run_openai_compatible_chat``, read from an SSE stream."""
     body: Dict[str, Any] = {
@@ -43,6 +45,7 @@ def stream_openai_compatible_chat(
         "messages": messages,
         "stream": True,
         "stream_options": {"include_usage": True},
+        **(extra_body or {}),
     }
     if temperature is not None:
         body["temperature"] = temperature
@@ -55,7 +58,7 @@ def stream_openai_compatible_chat(
     response_id: Optional[str] = None
     finished = False
     endpoint = f"{base_url.rstrip('/')}/chat/completions"
-    with enhancement_provider._http_client() as client:
+    with enhancement_provider._http_client(timeout) as client:
         with client.stream(
             "POST", endpoint, headers=enhancement_provider._openai_compatible_headers(api_key), json=body
         ) as response:
