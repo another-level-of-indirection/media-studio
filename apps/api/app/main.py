@@ -174,7 +174,7 @@ def _resolve_media_file_path(file_path: str) -> Optional[Path]:
             relative = resolved.relative_to(data_root)
         except ValueError:
             continue
-        if relative.parts[:2] == ("runtime", "codex-local"):
+        if relative.parts[:2] in {("runtime", "codex-local"), ("runtime", "assistant-transcripts")}:
             continue
         return resolved
     return None

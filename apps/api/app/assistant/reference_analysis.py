@@ -12,6 +12,7 @@ from ..graph.media_refs import graph_ref_path
 from ..graph.schemas import GraphOutputRef
 from .limits import ASSISTANT_IMAGE_ATTACHMENT_LIMIT, is_image_attachment
 from .provider_support import reference_media_path, resolve_assistant_provider_runtime
+from ..assistant_runtime import RuntimeConnection, StepRequest, connection_from_settings, get_assistant_runtime, runtime_supports_vision
 from .schemas import AssistantVisualAnalysis, AssistantVisualAnalysisGoal
 
 
@@ -72,18 +73,25 @@ class ReferenceAnalysisError(Exception):
         self.retryable = retryable
 
 
-def _run_visual_analysis(context, **kwargs):
+def _run_visual_analysis(context, *, runtime_kind: str = "codex_local", connection=None, **kwargs):
     from .cancellation import AssistantRequestCancelled, is_cancelled
     from .schemas import AssistantKernelProviderTrace
     steps = getattr(context, "provider_steps", None)
     trace = AssistantKernelProviderTrace(purpose=kwargs.get("error_context", "visual analysis"), model_id=kwargs.get("model_id"))
+    visual_runtime = get_assistant_runtime(runtime_kind)
     try:
-        result = enhancement_provider.run_codex_local_chat(**kwargs, unbounded_turn=True)
-        trace.usage = dict(result.get("usage") or {})
-        trace.latency_ms = result.get("latency_ms")
-        trace.prompt_bytes = result.get("prompt_bytes")
-        trace.reasoning_effort = result.get("reasoning_effort")
-        trace.compaction = result.get("compaction")
+        if not runtime_supports_vision(runtime_kind):
+            raise enhancement_provider.EnhancementProviderError("The configured provider cannot analyze images.")
+        result = visual_runtime.run_step(StepRequest(
+            model_id=kwargs.get("model_id"), messages=kwargs.get("messages") or [],
+            response_schema=kwargs.get("response_format"), unbounded=True,
+            error_context=kwargs.get("error_context", "visual analysis"),
+            timeout_seconds=kwargs.get("timeout_seconds"), cancel_event=kwargs.get("cancel_event"),
+            connection=connection or RuntimeConnection(),
+        ))
+        fields = result.trace_fields()
+        for key in ("usage", "latency_ms", "prompt_bytes", "reasoning_effort", "compaction"):
+            setattr(trace, key, fields[key])
         if is_cancelled(context.cancel_event):
             raise AssistantRequestCancelled("Visual analysis stopped before saving evidence.", outcome="cancelled_after_analysis")
         return result
@@ -301,13 +309,15 @@ def _analyze_output(arguments: BaseModel, context: Any, *, output_kind: Literal[
         },
     ]
     runtime = resolve_assistant_provider_runtime(session)
-    if runtime.provider_kind != "codex_local":
+    if not runtime_supports_vision(runtime.provider_kind):
         raise ReferenceAnalysisError(
             code="analysis_provider_unsupported",
             message=f"The configured assistant provider cannot compare {output_kind} output through the kernel.",
         )
     try:
         provider_result = _run_visual_analysis(context,
+            runtime_kind=runtime.provider_kind,
+            connection=connection_from_settings(runtime),
             model_id=runtime.provider_model_id,
             messages=messages,
             response_format=_comparison_response_format(output_kind),
@@ -316,7 +326,7 @@ def _analyze_output(arguments: BaseModel, context: Any, *, output_kind: Literal[
             cancel_event=context.cancel_event,
         )
         comparison = GeneratedOutputComparison.model_validate_json(
-            str(provider_result.get("generated_text") or "{}")
+            provider_result.text or "{}"
         )
     except (enhancement_provider.EnhancementProviderError, ValidationError) as exc:
         raise ReferenceAnalysisError(
@@ -398,7 +408,7 @@ def analyze_result_image(item: Dict[str, Any], arguments: Any, context: Any) -> 
     except (ValueError, OSError) as exc:
         raise ReferenceAnalysisError(code="result_image_unavailable", message="The selected image is no longer accessible.") from exc
     runtime = resolve_assistant_provider_runtime(session)
-    if runtime.provider_kind != "codex_local":
+    if not runtime_supports_vision(runtime.provider_kind):
         raise ReferenceAnalysisError(code="analysis_provider_unsupported", message="The configured assistant provider cannot inspect result images.")
     instruction = (
         "Inspect the first image: the user's selected completed result. Remaining images, if any, are source "
@@ -409,6 +419,8 @@ def analyze_result_image(item: Dict[str, Any], arguments: Any, context: Any) -> 
     )
     try:
         result = _run_visual_analysis(context,
+            runtime_kind=runtime.provider_kind,
+            connection=connection_from_settings(runtime),
             model_id=runtime.provider_model_id,
             messages=[
                 {"role": "system", "content": "You inspect completed media using only visible evidence. Keep observations short and concrete."},
@@ -424,7 +436,7 @@ def analyze_result_image(item: Dict[str, Any], arguments: Any, context: Any) -> 
             timeout_seconds=context.timeout_seconds,
             cancel_event=context.cancel_event,
         )
-        analysis = ResultImageAnalysis.model_validate_json(str(result.get("generated_text") or "{}"))
+        analysis = ResultImageAnalysis.model_validate_json(result.text or "{}")
     except (enhancement_provider.EnhancementProviderError, ValidationError) as exc:
         raise ReferenceAnalysisError(code="result_image_analysis_failed", message=str(exc), retryable=True) from exc
     return analysis.model_dump(mode="json")
@@ -591,7 +603,7 @@ def analyze_reference_images(arguments: BaseModel, context: Any) -> Dict[str, An
             }
 
     runtime = resolve_assistant_provider_runtime(session)
-    if runtime.provider_kind != "codex_local":
+    if not runtime_supports_vision(runtime.provider_kind):
         raise ReferenceAnalysisError(
             code="analysis_provider_unsupported",
             message="The configured assistant provider cannot analyze reference images through the kernel.",
@@ -611,6 +623,8 @@ def analyze_reference_images(arguments: BaseModel, context: Any) -> Dict[str, An
     ]
     try:
         provider_result = _run_visual_analysis(context,
+            runtime_kind=runtime.provider_kind,
+            connection=connection_from_settings(runtime),
             model_id=runtime.provider_model_id,
             messages=messages,
             response_format=_analysis_response_format(),
@@ -618,7 +632,7 @@ def analyze_reference_images(arguments: BaseModel, context: Any) -> Dict[str, An
             timeout_seconds=context.timeout_seconds,
             cancel_event=context.cancel_event,
         )
-        analysis = AssistantVisualAnalysis.model_validate_json(str(provider_result.get("generated_text") or "{}"))
+        analysis = AssistantVisualAnalysis.model_validate_json(provider_result.text or "{}")
     except (enhancement_provider.EnhancementProviderError, ValidationError) as exc:
         raise ReferenceAnalysisError(
             code="reference_analysis_failed",

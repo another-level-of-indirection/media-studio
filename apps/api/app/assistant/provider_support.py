@@ -16,6 +16,7 @@ from ..service_provider_config import (
 from ..settings import settings
 from .cancellation import AssistantSessionBusy, cancel_session, wait_for_session_idle
 from .limits import ASSISTANT_IMAGE_ATTACHMENT_LIMIT, is_image_attachment
+from ..assistant_runtime import get_assistant_runtime
 
 
 ASSISTANT_CHAT_DEFAULT_MAX_TOKENS = 900
@@ -132,7 +133,7 @@ def assistant_provider_generation(session: Dict[str, Any]) -> int:
         return 0
 
 
-def assistant_codex_session_key(session: Dict[str, Any]) -> str:
+def assistant_session_key(session: Dict[str, Any]) -> str:
     session_id = string_value(session.get("assistant_session_id"))
     return (
         f"{session_id}:{assistant_provider_generation(session)}"
@@ -141,15 +142,18 @@ def assistant_codex_session_key(session: Dict[str, Any]) -> str:
     )
 
 
+# Backward-compatible name from before the runtime seam.
+assistant_codex_session_key = assistant_session_key
+
+
 def sync_assistant_session_provider(session: Dict[str, Any], *, force_new_thread: bool = False) -> Dict[str, Any]:
     provider_fields = assistant_provider_fields(session)
     if not force_new_thread and all(session.get(key) == value for key, value in provider_fields.items()):
         return session
     generation = assistant_provider_generation(session)
-    if string_value(session.get("provider_kind")) == "codex_local":
-        enhancement_provider.codex_local_provider.close_codex_local_skill_session(
-            assistant_codex_session_key(session)
-        )
+    session_runtime = get_assistant_runtime(string_value(session.get("provider_kind")))
+    if session_runtime is not None:
+        session_runtime.close_session(assistant_session_key(session))
     snapshot = (
         dict(session.get("state_snapshot_json"))
         if isinstance(session.get("state_snapshot_json"), dict)
@@ -231,21 +235,17 @@ def archive_assistant_session(record: Dict[str, Any]) -> Dict[str, Any]:
         string_value(snapshot.get("provider_archived_thread_id")) == thread_id
         and archive_status == "archived"
     )
-    if string_value(record.get("provider_kind")) == "codex_local":
-        session_key = assistant_codex_session_key(record)
+    record_runtime = get_assistant_runtime(string_value(record.get("provider_kind")))
+    if record_runtime is not None:
+        session_key = assistant_session_key(record)
         if thread_id and not already_archived:
             archive_status = (
                 "archived"
-                if enhancement_provider.codex_local_provider.archive_codex_local_thread(
-                    session_key=session_key,
-                    thread_id=thread_id,
-                )
+                if record_runtime.archive_session(session_key, thread_id)
                 else "unavailable"
             )
         elif not thread_id:
-            enhancement_provider.codex_local_provider.close_codex_local_skill_session(
-                session_key
-            )
+            record_runtime.close_session(session_key)
             archive_status = "no_thread"
     return store_assistant.create_or_update_assistant_session(
         {

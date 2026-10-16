@@ -22,6 +22,8 @@ node scripts/assistant_conversation_probe.mjs --validate-only
   apps/api/tests/test_assistant_kernel.py::test_kernel_retries_guidance_that_claims_missing_evidence \
   apps/api/tests/test_assistant_graph_plan.py \
   apps/api/tests/test_assistant_confirmation_routes.py \
+  apps/api/tests/test_assistant_runtime_contract.py \
+  apps/api/tests/test_assistant_runtime_seam.py \
   apps/api/tests/test_file_size_guardrails.py \
   apps/api/tests/test_media_assistant_prompt_assets.py \
   apps/api/tests/test_media_assistant_feature_gate.py

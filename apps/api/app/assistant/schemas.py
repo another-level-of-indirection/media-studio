@@ -212,8 +212,8 @@ class AssistantKernelProviderTrace(BaseModel):
     model_id: Optional[str] = None
     provider_thread_id: Optional[str] = None
     provider_turn_id: Optional[str] = None
-    process_lifecycle: Optional[Literal["process_spawned", "process_reused"]] = None
-    reuse_mode: Optional[Literal["new_thread", "live_process", "disk_resume", "replacement_thread"]] = None
+    process_lifecycle: Optional[Literal["process_spawned", "process_reused", "no_process"]] = None
+    reuse_mode: Optional[Literal["new_thread", "live_process", "disk_resume", "replacement_thread", "client_replay"]] = None
     usage: Dict[str, Any] = Field(default_factory=dict)
     latency_ms: Optional[int] = None
     prompt_bytes: Optional[int] = None

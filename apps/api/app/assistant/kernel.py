@@ -30,10 +30,11 @@ from .planning_recovery import record_planning_recovery
 from .prompt_assets import assistant_thread_prompt_assembly
 from .provider_support import (
     AssistantProviderChatError,
-    assistant_codex_session_key,
     assistant_provider_generation,
+    assistant_session_key,
     resolve_assistant_provider_runtime,
 )
+from ..assistant_runtime import StepRequest, connection_from_settings, get_assistant_runtime, runtime_supports_kernel
 from .schemas import (
     AssistantArtifactIntent,
     AssistantGraphPlan,
@@ -151,9 +152,9 @@ def _sync_kernel_prompt_thread(
         },
     }
     if session.get("provider_thread_id"):
-        enhancement_provider.codex_local_provider.close_codex_local_skill_session(
-            assistant_codex_session_key(session)
-        )
+        session_runtime = get_assistant_runtime(session.get("provider_kind") or "codex_local")
+        if session_runtime is not None:
+            session_runtime.close_session(assistant_session_key(session))
         updated["provider_thread_id"] = None
         updated["state_snapshot_json"]["provider_thread_reset_reason"] = "instructions_changed"
         updated["state_snapshot_json"]["provider_generation"] = (
@@ -762,76 +763,59 @@ def run_kernel_provider_step(
     on_compaction=None,
 ) -> Dict[str, Any]:
     runtime = resolve_assistant_provider_runtime(session)
-    if runtime.provider_kind != "codex_local":
+    step_runtime = get_assistant_runtime(runtime.provider_kind)
+    if step_runtime is None or not step_runtime.capabilities.structured_output:
         raise AssistantProviderChatError("The configured provider does not support the Media Assistant kernel.")
     session_id = str(session.get("assistant_session_id") or "").strip()
     if not session_id:
         raise AssistantProviderChatError("The assistant session could not reuse its Codex process.")
     try:
-        result = enhancement_provider.run_codex_local_chat(
-            model_id=runtime.provider_model_id,
-            messages=messages,
-            response_format=_provider_step_schema(),
-            error_context="media assistant kernel",
-            timeout_seconds=timeout_seconds,
-            unbounded_turn=True,
-            cancel_event=cancel_event,
-            codex_session_key=assistant_codex_session_key(session),
-            provider_thread_id=session.get("provider_thread_id"),
-            thread_base_instructions=thread_base_instructions,
-            thread_developer_instructions=thread_developer_instructions,
-            reasoning_effort=reasoning_effort,
-            client_user_message_id=client_user_message_id,
-            compact_before_turn=compact_before_turn,
-            on_compaction=on_compaction,
-            resume_usage=(session.get("summary_json") or {}).get("kernel_provider_usage"),
+        result = step_runtime.run_step(
+            StepRequest(
+                model_id=runtime.provider_model_id,
+                messages=messages,
+                response_schema=_provider_step_schema(),
+                error_context="media assistant kernel",
+                timeout_seconds=timeout_seconds,
+                unbounded=True,
+                cancel_event=cancel_event,
+                connection=connection_from_settings(runtime),
+                session_key=assistant_session_key(session),
+                provider_state=session.get("provider_thread_id"),
+                base_instructions=thread_base_instructions,
+                developer_instructions=thread_developer_instructions,
+                reasoning_effort=reasoning_effort,
+                client_message_id=client_user_message_id,
+                compact_before_turn=compact_before_turn,
+                on_compaction=on_compaction,
+                resume_usage=(session.get("summary_json") or {}).get("kernel_provider_usage"),
+            )
         )
     except enhancement_provider.EnhancementProviderError as exc:
         if provider_steps is not None:
             provider_steps.append(AssistantKernelProviderTrace(model_id=runtime.provider_model_id))
         if is_cancelled(cancel_event):
-            interrupted = isinstance(
-                exc.__cause__,
-                enhancement_provider.codex_local_provider.CodexLocalProviderCancelled,
-            )
+            interrupted = step_runtime.was_interrupted(exc)
             raise AssistantRequestCancelled(
                 "Assistant kernel turn was cancelled.",
                 outcome="interrupted" if interrupted else "process_reset",
             ) from exc
         raise AssistantProviderChatError(str(exc)) from exc
-    thread_id = str(result.get("provider_thread_id") or "").strip()
+    thread_id = str(result.provider_state or "").strip()
     if thread_id and thread_id != str(session.get("provider_thread_id") or "").strip():
         stored = store_assistant.create_or_update_assistant_session({**session, "provider_thread_id": thread_id})
         session.update(stored)
     if provider_lifecycle is not None:
-        provider_lifecycle.extend(
-            str(event)
-            for event in result.get("thread_lifecycle") or []
-            if str(event)
-        )
+        provider_lifecycle.extend(result.lifecycle)
     if provider_steps is not None:
         provider_steps.append(
             AssistantKernelProviderTrace(
                 model_id=runtime.provider_model_id,
                 provider_thread_id=thread_id or None,
-                provider_turn_id=str(result.get("provider_turn_id") or "").strip() or None,
-                process_lifecycle=result.get("process_lifecycle"),
-                reuse_mode=result.get("reuse_mode"),
-                usage=dict(result.get("usage") or {}),
-                latency_ms=result.get("latency_ms"),
-                prompt_bytes=result.get("prompt_bytes"),
-                reasoning_effort=str(result.get("reasoning_effort") or "").strip() or None,
-                client_user_message_id=(
-                    str(result.get("client_user_message_id") or "").strip() or None
-                ),
-                compaction=(
-                    dict(result.get("compaction"))
-                    if isinstance(result.get("compaction"), dict)
-                    else None
-                ),
+                **result.trace_fields(),
             )
         )
-    return json.loads(str(result.get("generated_text") or "{}"))
+    return json.loads(result.text or "{}")
 
 
 def run_read_only_provider_turn(
@@ -841,7 +825,7 @@ def run_read_only_provider_turn(
     cancel_event: Event | None,
 ) -> AssistantKernelTurnResult:
     runtime = resolve_assistant_provider_runtime(session)
-    if runtime.provider_kind == "codex_local":
+    if runtime_supports_kernel(runtime.provider_kind):
         raise AssistantProviderChatError("Codex Local should use the tool-capable assistant kernel.")
     history = [
         {"role": item["role"], "content": item["text"]}
@@ -926,7 +910,7 @@ def run_assistant_kernel_turn(
         )
 
     runtime = resolve_assistant_provider_runtime(session)
-    if runtime.provider_kind != "codex_local":
+    if not runtime_supports_kernel(runtime.provider_kind):
         return run_read_only_provider_turn(
             session=session,
             user_text=user_text,
