@@ -90,6 +90,7 @@ class AppSettings(BaseModel):
     media_assistant_enabled: bool = False
     media_assistant_experimental_runtimes: tuple[str, ...] = ()
     media_assistant_provider: Optional[str] = None
+    media_assistant_stream: bool = False
     merge_api_key: Optional[str] = None
     merge_base_url: str = "https://api-gateway.merge.dev/v1/openai"
     merge_model: Optional[str] = None
@@ -154,6 +155,7 @@ settings = AppSettings(
         if item.strip()
     ),
     media_assistant_provider=os.getenv("MEDIA_ASSISTANT_PROVIDER", "").strip() or None,
+    media_assistant_stream=os.getenv("MEDIA_ASSISTANT_STREAM", "").strip() == "1",
     merge_api_key=os.getenv("MERGE_API_KEY") or None,
     merge_base_url=os.getenv("MERGE_BASE_URL", "").strip() or "https://api-gateway.merge.dev/v1/openai",
     merge_model=os.getenv("MERGE_MODEL", "").strip() or None,

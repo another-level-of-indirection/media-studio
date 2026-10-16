@@ -40,7 +40,7 @@ def app_modules(tmp_path: Path):
     )
     os.environ["KIE_API_KEY"] = ""
     os.environ["OPENROUTER_API_KEY"] = ""
-    for name in ("MEDIA_ASSISTANT_PROVIDER", "MERGE_API_KEY", "MERGE_MODEL", "MERGE_BASE_URL"):
+    for name in ("MEDIA_ASSISTANT_PROVIDER", "MEDIA_ASSISTANT_STREAM", "MERGE_API_KEY", "MERGE_MODEL", "MERGE_BASE_URL"):
         os.environ[name] = ""  # keep a developer's .env from leaking into tests
     os.environ["MEDIA_ENABLE_LIVE_SUBMIT"] = "0"
     os.environ["MEDIA_BACKGROUND_POLL_ENABLED"] = "0"

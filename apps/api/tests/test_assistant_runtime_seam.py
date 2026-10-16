@@ -675,3 +675,121 @@ def test_cancel_stops_retrying(openai_runtime, monkeypatch) -> None:
         resilience.call_with_retries(failing, cancel_event=cancel)
 
     assert len(attempts) == 1
+
+
+# -- streaming ---------------------------------------------------------------
+def _sse(*events, done=True):
+    lines = [f"data: {json.dumps(event)}\n\n" for event in events]
+    if done:
+        lines.append("data: [DONE]\n\n")
+    return lines
+
+
+def _delta(text, finish=None):
+    return {"id": "r1", "choices": [{"delta": {"content": text}, "finish_reason": finish}]}
+
+
+def _stream_to(monkeypatch, chunks, status=200, on_chunk=None):
+    import httpx
+
+    ep = importlib.import_module("app.enhancement_provider")
+
+    class Body(httpx.SyncByteStream):
+        def __init__(self):
+            self.closed = False
+
+        def __iter__(self):
+            for chunk in chunks:
+                if on_chunk is not None:
+                    on_chunk(chunk)
+                yield chunk.encode()
+
+        def close(self):
+            self.closed = True
+
+    body = Body()
+    transport = httpx.MockTransport(lambda request: httpx.Response(status, stream=body))
+    monkeypatch.setattr(ep, "_http_client", lambda: httpx.Client(transport=transport))
+    return body
+
+
+def _stream_call(**overrides):
+    streaming = importlib.import_module("app.assistant_runtime.streaming")
+    values = dict(provider_kind="p", base_url="http://x/v1", api_key="k", model_id="m", messages=[])
+    values.update(overrides)
+    return streaming.stream_openai_compatible_chat(**values)
+
+
+def test_stream_collects_text_usage_and_cost(app_modules, monkeypatch) -> None:
+    del app_modules
+    chunks = _sse(_delta('{"a":'), _delta("1}", "stop"), {"id": "r1", "choices": [], "usage": {"prompt_tokens": 5, "cost": 0.01}})
+    _stream_to(monkeypatch, chunks)
+
+    result = _stream_call()
+
+    assert result["generated_text"] == '{"a":1}'
+    assert result["usage"]["prompt_tokens"] == 5 and result["cost"] == 0.01
+    assert result["provider_response_id"] == "r1"
+
+
+def test_stream_cancel_stops_reading_and_closes_the_connection(app_modules, monkeypatch) -> None:
+    del app_modules
+    cancel = threading.Event()
+    seen: List[str] = []
+    chunks = _sse(_delta("a"), _delta("b"), _delta("c"), _delta("d"), done=False)
+
+    def on_chunk(item):
+        seen.append(item)
+        cancel.set()  # Stop arrives while the first chunk is being delivered
+
+    body = _stream_to(monkeypatch, chunks, on_chunk=on_chunk)
+    ep = importlib.import_module("app.enhancement_provider")
+
+    with pytest.raises(ep.EnhancementProviderError, match="interrupted"):
+        _stream_call(cancel_event=cancel)
+
+    assert len(seen) < len(chunks)
+    assert body.closed is True
+
+
+def test_stream_http_error_carries_the_status(app_modules, monkeypatch) -> None:
+    del app_modules
+    _stream_to(monkeypatch, [], status=503)
+    ep = importlib.import_module("app.enhancement_provider")
+
+    with pytest.raises(ep.EnhancementProviderError) as caught:
+        _stream_call()
+
+    assert caught.value.status_code == 503
+
+
+def test_stream_cut_short_or_failed_midway_is_transient(app_modules, monkeypatch) -> None:
+    del app_modules
+    ep = importlib.import_module("app.enhancement_provider")
+    resilience = importlib.import_module("app.assistant_runtime.resilience")
+    for chunks in (_sse(_delta("partial"), done=False), _sse(_delta("x"), {"error": {"message": "boom"}})):
+        _stream_to(monkeypatch, chunks)
+        with pytest.raises(ep.EnhancementProviderError) as caught:
+            _stream_call()
+        assert resilience.is_transient(caught.value)
+
+
+def test_runtime_streams_only_when_enabled(app_modules, monkeypatch) -> None:
+    del app_modules
+    settings_module = importlib.import_module("app.settings")
+    module = importlib.import_module("app.assistant_runtime.openai_compatible")
+    runtime_module = importlib.import_module("app.assistant_runtime")
+    monkeypatch.setattr(settings_module.settings, "media_assistant_stream", True, raising=False)
+    module.register_experimental_runtimes(("local_openai",))
+    monkeypatch.setattr(
+        module, "stream_openai_compatible_chat", lambda **kwargs: {"generated_text": '{"reply":"s"}', "usage": {}}
+    )
+    request = runtime_module.StepRequest(
+        model_id="m",
+        messages=[{"role": "user", "content": "hi"}],
+        connection=runtime_module.RuntimeConnection(base_url="http://x/v1", api_key="k"),
+    )
+
+    assert runtime_module.get_assistant_runtime("local_openai").stream is True
+    assert runtime_module.get_assistant_runtime("local_openai").run_step(request).text == '{"reply":"s"}'
+    assert module.OpenAICompatibleRuntime("local_openai").stream is False

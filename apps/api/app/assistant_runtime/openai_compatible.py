@@ -25,6 +25,7 @@ import json
 import re
 import threading
 import time
+from functools import partial
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -33,6 +34,7 @@ from ..settings import settings
 from ..store_support import new_id
 from .env_providers import ANTHROPIC_SCHEMA_KINDS, PROMPT_CACHE_KINDS, VISION_PROVIDER_KINDS, selected_env_provider
 from .resilience import call_with_retries
+from .streaming import stream_openai_compatible_chat
 from . import (
     RuntimeCapabilities,
     RuntimeInterrupted,
@@ -192,10 +194,12 @@ class OpenAICompatibleRuntime:
         vision: bool = False,
         strip_constraints: bool = False,
         prompt_cache: bool = False,
+        stream: bool = False,
     ) -> None:
         self.kind = kind
         self.strip_constraints = strip_constraints
         self.prompt_cache = prompt_cache
+        self.stream = stream
         self.capabilities = RuntimeCapabilities(
             structured_output=True,
             vision=vision,
@@ -321,18 +325,24 @@ class OpenAICompatibleRuntime:
             *(_wire_message(message) for message in (*history, *request.messages)),
         ]
         max_tokens = max(int(request.connection.max_tokens or 0), self.STEP_MIN_MAX_TOKENS)
+        chat_kwargs = dict(
+            provider_kind=self.kind,
+            base_url=base_url,
+            api_key=request.connection.api_key,
+            model_id=request.model_id,
+            messages=outbound,
+            temperature=request.connection.temperature,
+            max_tokens=max_tokens,
+            response_format=_strict_response_format(request.response_schema, strip_constraints=self.strip_constraints),
+            error_context=request.error_context,
+        )
+        if self.stream:
+            # Closing the stream on Stop is what stops provider-side generation.
+            chat = partial(stream_openai_compatible_chat, **chat_kwargs, cancel_event=request.cancel_event)
+        else:
+            chat = partial(enhancement_provider.run_openai_compatible_chat, **chat_kwargs)
         result = _run_cancellable(
-            lambda: call_with_retries(lambda: enhancement_provider.run_openai_compatible_chat(
-                provider_kind=self.kind,
-                base_url=base_url,
-                api_key=request.connection.api_key,
-                model_id=request.model_id,
-                messages=outbound,
-                temperature=request.connection.temperature,
-                max_tokens=max_tokens,
-                response_format=_strict_response_format(request.response_schema, strip_constraints=self.strip_constraints),
-                error_context=request.error_context,
-            ), cancel_event=request.cancel_event),
+            lambda: call_with_retries(chat, cancel_event=request.cancel_event),
             cancel_event=request.cancel_event,
             timeout_seconds=None if request.unbounded else request.timeout_seconds,
         )
@@ -391,4 +401,4 @@ def register_experimental_runtimes(kinds: Optional[Tuple[str, ...]] = None) -> N
     registered = get_registered_kinds()
     for kind in enabled:
         if kind in SUPPORTED_KINDS and kind not in registered:
-            register_runtime(OpenAICompatibleRuntime(kind, vision=kind in VISION_PROVIDER_KINDS, strip_constraints=kind in ANTHROPIC_SCHEMA_KINDS, prompt_cache=kind in PROMPT_CACHE_KINDS))
+            register_runtime(OpenAICompatibleRuntime(kind, vision=kind in VISION_PROVIDER_KINDS, strip_constraints=kind in ANTHROPIC_SCHEMA_KINDS, prompt_cache=kind in PROMPT_CACHE_KINDS, stream=settings.media_assistant_stream))
