@@ -8,7 +8,7 @@ Media Studio owns the local application, library, presets and visual workflows. 
 | --- | --- | --- |
 | Studio | Image/video generation, revisions, presets and local media library | [Overview](../README.md), [controls](keyboard-mouse-controls.md) |
 | Graph Studio — experimental | Backend-defined visual workflows for image, video, audio and prompt processing | [Design contract](graph-studio-design.md), [node library](graph-studio-node-library.md), [node authoring](graph-studio-node-authoring.md) |
-| Media Assistant — experimental | Graph workspace assistance, reusable artifact drafting, reviewed edits and separate execution approval | [Behavior](media-assistant.md), [setup](media-assistant-setup.md), [continuations](media-assistant-continuations.md), [result reuse](media-assistant-result-reuse.md) |
+| Media Assistant — experimental | Graph workspace assistance, reusable artifact drafting, reviewed edits and separate execution approval | [Behavior](media-assistant.md), [setup](media-assistant-setup.md), [runtime contract](assistant-runtime-contract.md), [continuations](media-assistant-continuations.md), [result reuse](media-assistant-result-reuse.md) |
 | Media Presets | Reusable generation templates, fields and media inputs | [Preset system](media-studio-preset-system.md) |
 | Prompt Recipes | Reusable LLM instructions and inputs, distinct from Media Presets | [Overview](../README.md), [Graph node library](graph-studio-node-library.md) |
 
@@ -18,7 +18,7 @@ Suno audio generation is available in Graph Studio. The main Studio composer rem
 
 ## Setup and operations
 
-[macOS](getting-started-mac.md) · [Windows](getting-started-windows.md) · [Linux](getting-started-linux.md) · [Prerequisites](prerequisites.md) · [Advanced runtime](advanced-runtime.md) · [Supervision](runtime-and-supervision.md) · [Pricing integration](pricing-integration.md) · [Release packaging](release-packaging.md)
+[macOS](getting-started-mac.md) · [Windows](getting-started-windows.md) · [Linux](getting-started-linux.md) · [Prerequisites](prerequisites.md) · [Advanced runtime](advanced-runtime.md) · [Architecture overview](project-architecture-overview.md) · [Supervision](runtime-and-supervision.md) · [Pricing integration](pricing-integration.md) · [Release packaging](release-packaging.md)
 
 ## Release notes and historical evidence
 

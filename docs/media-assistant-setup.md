@@ -32,6 +32,8 @@ OpenRouter and local OpenAI-compatible endpoints remain supported for configured
 
 Adding another full Assistant runtime would require a deliberately implemented and tested adapter for sessions, tool calls, cancellation, progress, approvals, and persisted continuity. Provider-name substitution alone is not sufficient.
 
+The kernel talks to its model through a provider-neutral runtime seam, so a second runtime is an adapter, not a rewrite. An experimental OpenAI-compatible runtime exists behind `MEDIA_ASSISTANT_EXPERIMENTAL_RUNTIMES`; it is off by default and not part of the supported requirement above. See the [runtime contract](assistant-runtime-contract.md) for the interface, the contract tests every runtime must pass, and known gaps.
+
 ## Troubleshooting
 
 - Confirm `codex` starts successfully for the same operating-system user that starts Media Studio.
