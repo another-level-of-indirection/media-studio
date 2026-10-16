@@ -10,7 +10,7 @@ Findings come from a live capability run of `anthropic/claude-sonnet-5-5` throug
 | No retry on gateway errors | `assistant_runtime/resilience.py` retries 408/409/425/429/5xx and connection errors up to 3 attempts (1 s, 3 s backoff), stops on Stop, never retries 4xx. |
 | Compaction broke the cache and cut mid-turn | Compaction drops whole turns, always starts on a user message, and trims to 60% of the budget, so it happens once every several turns instead of every turn. |
 
-These are covered by unit tests only. The cache saving has not been re-measured end to end, to avoid spending on live calls. Check it once with the smoke test below.
+These are covered by unit tests. The cache saving was confirmed live through the runtime with two calls in separate new sessions: the second read all 20,308 prompt tokens from cache and cost 0.2¢ instead of 5.1¢. Retries and compaction have not been exercised against the live gateway.
 
 ## Remaining gaps
 
