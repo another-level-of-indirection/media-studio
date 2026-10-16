@@ -17,6 +17,7 @@ from ..graph.pricing import estimate_graph_workflow
 from ..graph.registry import registry
 from ..graph.schemas import GraphWorkflow, GraphWorkflowNode
 from ..graph.validator import validate_workflow
+from ..assistant_runtime.json_repair import repair_json_object
 from ..service_errors import ServiceError
 from ..service_image_models import resolve_image_model
 from ..service_prompt_recipe_validation import prompt_recipe_media_generation
@@ -2257,7 +2258,12 @@ def execute_kernel_tool(
     result: Dict[str, Any] | None = None
     parsed_payload: Dict[str, Any] | None = None
     try:
-        decoded = json.loads(arguments) if isinstance(arguments, str) else arguments
+        try:
+            decoded = json.loads(arguments) if isinstance(arguments, str) else arguments
+        except json.JSONDecodeError:
+            decoded = repair_json_object(arguments)
+            if decoded is None:
+                raise
         if not isinstance(decoded, dict):
             raise ValueError("Tool arguments must decode to an object.")
         parsed_payload = decoded

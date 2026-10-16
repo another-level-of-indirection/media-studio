@@ -852,3 +852,52 @@ def test_mtplx_thinking_can_be_enabled(app_modules, monkeypatch) -> None:
     env_providers = importlib.import_module("app.assistant_runtime.env_providers")
 
     assert env_providers.env_provider_config("mtplx").extra_body == {"chat_template_kwargs": {"enable_thinking": True}}
+
+
+# -- tool-argument repair ----------------------------------------------------
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("{'a': 1, 'b': [True, None]}", {"a": 1, "b": [True, None]}),
+        ('{a: 1, "b": "x"}', {"a": 1, "b": "x"}),
+        ('{"a": 1, "b": [1, 2,],}', {"a": 1, "b": [1, 2]}),
+        ('```json\n{"a": 1}\n```', {"a": 1}),
+        ('{"a": "line one\nline two"}', {"a": "line one\nline two"}),
+    ],
+)
+def test_repair_json_object_fixes_common_model_mistakes(text, expected) -> None:
+    from app.assistant_runtime.json_repair import repair_json_object
+
+    assert repair_json_object(text) == expected
+
+
+@pytest.mark.parametrize("text", ["", "not json", "[1, 2]", "{'a': ", '{"a": __import__("os")}', None, 5])
+def test_repair_json_object_refuses_what_it_cannot_trust(text) -> None:
+    from app.assistant_runtime.json_repair import repair_json_object
+
+    assert repair_json_object(text) is None
+
+
+def test_kernel_accepts_python_style_tool_arguments(client, monkeypatch) -> None:
+    kernel = importlib.import_module("app.assistant.kernel")
+    steps = iter(
+        [
+            {"capability": "general", "tool_call": {"name": "read_current_workflow", "arguments": "{'include_fields': True}"}},
+            {"capability": "general", "reply": "Read it.", "requested_action": {"kind": "none"}},
+        ]
+    )
+    monkeypatch.setattr(kernel, "run_kernel_provider_step", lambda **_kwargs: next(steps))
+    workflow = {"schema_version": 1, "name": "Repair", "nodes": [], "edges": [], "metadata": {}}
+    session = client.post(
+        "/media/assistant/sessions",
+        json={"owner_kind": "graph_workflow", "owner_id": "workflow-repair", "workflow": workflow},
+    ).json()
+
+    response = client.post(
+        f"/media/assistant/sessions/{session['assistant_session_id']}/messages",
+        json={"content_text": "What is on my canvas?", "workflow": workflow},
+    )
+
+    turn = response.json()["messages"][-1]["content_json"]["kernel_turn"]
+    assert turn["trace"]["tool_calls"][0]["tool_name"] == "read_current_workflow"
+    assert turn["trace"]["tool_calls"][0].get("error") is None
