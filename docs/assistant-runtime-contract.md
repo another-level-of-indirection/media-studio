@@ -97,6 +97,7 @@ Restart the API and web app after changing them.
 - `MEDIA_ASSISTANT_PROVIDER` overrides the stored Media Assistant provider and registers the runtime, so `MEDIA_ASSISTANT_EXPERIMENTAL_RUNTIMES` is not needed. `MERGE_MODEL` overrides the stored model, because a stored Codex model id is meaningless here.
 - **Use `/v1/openai`.** On plain `/v1`, Merge returns strict-JSON answers as a tool call with empty `content`, which the kernel cannot read. A `MERGE_BASE_URL` ending in `/v1` is rewritten to `/v1/openai` automatically.
 - The step schema is sent with `$ref`/`$defs` inlined. With refs, Merge/Claude ignored the schema and answered in a free-form shape; inlined, the same schema is followed.
+- Claude Sonnet uses Anthropic's real structured output, which rejects `maxItems`, `maxLength` and similar keywords (400). They are stripped from the schema sent for `merge_gateway` and kept as a hint in each field description; the kernel still validates every step.
 - The kernel's `tool` result messages are sent as `user` messages. An orphan `tool` role makes Merge answer 500.
 - Vision is enabled for this kind (Claude accepts `image_url` parts). It has not been exercised live yet.
 - `/health` reports `media_assistant_runtime` and `media_assistant_runtime_ready`; the Graph Studio setup panel uses them, so it no longer asks for Codex.

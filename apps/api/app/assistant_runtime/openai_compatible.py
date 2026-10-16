@@ -31,7 +31,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from .. import codex_local_provider, enhancement_provider
 from ..settings import settings
 from ..store_support import new_id
-from .env_providers import VISION_PROVIDER_KINDS, selected_env_provider
+from .env_providers import ANTHROPIC_SCHEMA_KINDS, VISION_PROVIDER_KINDS, selected_env_provider
 from . import (
     RuntimeCapabilities,
     RuntimeInterrupted,
@@ -113,7 +113,33 @@ def _inline_refs(node: Any, defs: Dict[str, Any], stack: Tuple[str, ...] = ()) -
     return node
 
 
-def _strict_response_format(response_format: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+_CONSTRAINT_KEYS = (
+    "minLength", "maxLength", "minItems", "maxItems", "minimum", "maximum",
+    "exclusiveMinimum", "exclusiveMaximum", "multipleOf",
+)
+
+
+def _strip_constraints(node: Any) -> Any:
+    """Drop size/range keywords that Anthropic's structured output rejects.
+
+    The kernel re-validates every step with Pydantic, so the limits still hold;
+    they are kept as a hint in the field description.
+    """
+    if isinstance(node, dict):
+        hints = [f"{key}={node[key]}" for key in _CONSTRAINT_KEYS if key in node]
+        cleaned = {key: _strip_constraints(value) for key, value in node.items() if key not in _CONSTRAINT_KEYS}
+        if hints and isinstance(cleaned.get("type"), str):
+            note = f"Limits: {', '.join(hints)}."
+            cleaned["description"] = f"{cleaned['description']} {note}" if cleaned.get("description") else note
+        return cleaned
+    if isinstance(node, list):
+        return [_strip_constraints(item) for item in node]
+    return node
+
+
+def _strict_response_format(
+    response_format: Optional[Dict[str, Any]], *, strip_constraints: bool = False
+) -> Optional[Dict[str, Any]]:
     """Normalize a Pydantic JSON schema for strict structured-output endpoints.
 
     Reuses the Codex normalizer (all properties required, no additional
@@ -126,6 +152,8 @@ def _strict_response_format(response_format: Optional[Dict[str, Any]]) -> Option
     if not isinstance(schema, dict):
         return response_format
     normalized = codex_local_provider._normalize_strict_json_schema(schema)
+    if strip_constraints:
+        normalized = _strip_constraints(normalized)
     return {
         **response_format,
         "json_schema": {
@@ -152,8 +180,9 @@ class OpenAICompatibleRuntime:
     # Rough replay budget before ``compact_before_turn`` trims old messages.
     COMPACTION_CHAR_BUDGET = 240_000
 
-    def __init__(self, kind: str, *, vision: bool = False) -> None:
+    def __init__(self, kind: str, *, vision: bool = False, strip_constraints: bool = False) -> None:
         self.kind = kind
+        self.strip_constraints = strip_constraints
         self.capabilities = RuntimeCapabilities(
             structured_output=True,
             vision=vision,
@@ -268,7 +297,7 @@ class OpenAICompatibleRuntime:
                 messages=outbound,
                 temperature=request.connection.temperature,
                 max_tokens=max_tokens,
-                response_format=_strict_response_format(request.response_schema),
+                response_format=_strict_response_format(request.response_schema, strip_constraints=self.strip_constraints),
                 error_context=request.error_context,
             ),
             cancel_event=request.cancel_event,
@@ -329,4 +358,4 @@ def register_experimental_runtimes(kinds: Optional[Tuple[str, ...]] = None) -> N
     registered = get_registered_kinds()
     for kind in enabled:
         if kind in SUPPORTED_KINDS and kind not in registered:
-            register_runtime(OpenAICompatibleRuntime(kind, vision=kind in VISION_PROVIDER_KINDS))
+            register_runtime(OpenAICompatibleRuntime(kind, vision=kind in VISION_PROVIDER_KINDS, strip_constraints=kind in ANTHROPIC_SCHEMA_KINDS))

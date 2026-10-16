@@ -506,3 +506,29 @@ def test_kernel_tool_results_are_sent_as_user_messages(app_modules) -> None:
 
     assert openai_module._wire_message({"role": "tool", "content": "result"}) == {"role": "user", "content": "result"}
     assert openai_module._wire_message({"role": "assistant", "content": "x"}) == {"role": "assistant", "content": "x"}
+
+
+def test_anthropic_schema_drops_size_keywords_but_keeps_a_hint(app_modules) -> None:
+    del app_modules
+    openai_module = importlib.import_module("app.assistant_runtime.openai_compatible")
+    kernel = importlib.import_module("app.assistant.kernel")
+    schema_in = kernel._provider_step_schema()
+
+    stripped = json.dumps(openai_module._strict_response_format(schema_in, strip_constraints=True))
+    kept = json.dumps(openai_module._strict_response_format(schema_in))
+
+    for keyword in ("maxItems", "maxLength", "minLength"):
+        assert f'"{keyword}"' not in stripped
+    assert '"maxLength"' in kept  # other providers keep the limits
+    assert "Limits: maxLength=1200" in stripped
+
+
+def test_merge_gateway_runtime_strips_constraints_others_do_not(app_modules, monkeypatch) -> None:
+    del app_modules
+    _use_merge(monkeypatch)
+    runtime_module = importlib.import_module("app.assistant_runtime")
+    openai_module = importlib.import_module("app.assistant_runtime.openai_compatible")
+    openai_module.register_experimental_runtimes(("local_openai",))
+
+    assert runtime_module.get_assistant_runtime("merge_gateway").strip_constraints is True
+    assert runtime_module.get_assistant_runtime("local_openai").strip_constraints is False

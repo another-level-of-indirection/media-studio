@@ -15,6 +15,7 @@ from ..settings import settings
 
 ENV_PROVIDER_KINDS = ("merge_gateway",)
 VISION_PROVIDER_KINDS = ("merge_gateway",)  # Claude accepts OpenAI-style image_url parts.
+ANTHROPIC_SCHEMA_KINDS = ("merge_gateway",)  # Anthropic structured output rejects size/range keywords.
 
 
 @dataclass(frozen=True)
