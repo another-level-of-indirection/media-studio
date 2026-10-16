@@ -98,7 +98,8 @@ def test_step_runs_a_locked_down_cli_and_maps_the_result(fake_cli) -> None:
     assert argv[argv.index("--model") + 1] == "sonnet"
     schema = json.loads(argv[argv.index("--json-schema") + 1])
     assert schema["additionalProperties"] is False and "maxLength" not in schema["properties"]["reply"]
-    assert "BASE RULES" in call["prompt"] and "hi there" in call["prompt"]
+    assert "BASE RULES" in argv[argv.index("--system-prompt") + 1] and "hi there" in call["prompt"]
+    assert "BASE RULES" not in call["prompt"]
     assert "claude-code-cwd" in call["cwd"]
     assert result.usage["prompt_tokens"] == 110 and result.usage["completion_tokens"] == 5
     assert result.usage["cost"] == 0.01
@@ -170,3 +171,14 @@ def test_provider_needs_no_key_and_defaults_to_sonnet(fake_cli) -> None:
     resolved = support.resolve_assistant_provider_runtime({"provider_kind": "codex_local", "provider_model_id": "gpt-x"})
 
     assert (resolved.provider_kind, resolved.provider_model_id, resolved.api_key) == ("claude_code", "sonnet", None)
+
+
+def test_oversized_instructions_ride_on_stdin_off_macos(fake_cli, monkeypatch) -> None:
+    module, log = fake_cli
+    monkeypatch.setattr(module.sys, "platform", "linux")
+    monkeypatch.setattr(module, "_SYSTEM_ARG_LIMIT", 5)
+
+    _runtime().run_step(_request())
+
+    call = json.loads(log.read_text())
+    assert "BASE RULES" in call["prompt"] and "BASE RULES" not in json.dumps(call["argv"])

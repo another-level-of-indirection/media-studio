@@ -143,6 +143,8 @@ is only a model transport. The transcript is client-managed and replayed as the 
 * Sign-in belongs to Claude Code. Readiness runs `claude auth status` (cached 30 s); an expired session fails a
   step with "run `claude auth login`" and shows the assistant as not ready.
 * Stop kills the process. Transient API statuses (429/5xx/529) are retried like the HTTP runtimes.
+* The instructions go in `--system-prompt` so Claude Code caches them (a cold turn costs about $0.16, a warm one
+  about $0.016; the first version put them in the prompt and never hit the cache). Past 120 KB off macOS they ride on stdin.
 * No vision (images are replaced by a note) and Claude Code adds its own preamble to each request.
 * Usage reports `prompt_tokens`, `completion_tokens`, `cost` (Claude Code's `total_cost_usd`) and cache reads.
 * Tests use a fake `claude` executable (`tests/test_assistant_claude_code.py`); nothing there needs an account.

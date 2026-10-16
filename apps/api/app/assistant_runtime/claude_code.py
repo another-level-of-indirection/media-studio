@@ -24,6 +24,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -35,10 +36,13 @@ from .openai_compatible import OpenAICompatibleRuntime, _strict_response_format
 from .resilience import call_with_retries
 
 _FALLBACK_PATHS = ("~/.local/bin/claude", "/opt/homebrew/bin/claude", "/usr/local/bin/claude")
-_SYSTEM_PROMPT = (
-    "You are the reasoning engine of an application. Follow the instructions and conversation in the "
-    "user message and reply only with the structured JSON the schema asks for. You have no tools."
+_PREAMBLE = (
+    "You are the reasoning engine of an application. Follow the instructions and conversation you are "
+    "given and reply only with the structured JSON the schema asks for. You have no tools."
 )
+# The ~40k-token instructions go in --system-prompt so Claude Code caches them. A single argument is
+# limited to 128 KB on Linux (macOS has no per-argument limit), so past that they ride on stdin instead.
+_SYSTEM_ARG_LIMIT = 120_000
 _NOT_SIGNED_IN = "Claude Code is not signed in. Run `claude auth login` in a terminal, then try again."
 _TRANSIENT_STATUS = {408, 429, 500, 502, 503, 504, 529}
 _AUTH_CACHE_SECONDS = 30.0
@@ -98,11 +102,14 @@ def _text_of(content: Any) -> str:
     return "" if content is None else str(content)
 
 
-def render_prompt(messages: List[Dict[str, Any]]) -> str:
-    """Instructions first, then the transcript, then the cue for the next step."""
+def split_instructions(messages: List[Dict[str, Any]]) -> tuple[str, List[Dict[str, Any]]]:
     instructions = [_text_of(m.get("content")) for m in messages if m.get("role") == "system"]
-    turns = [m for m in messages if m.get("role") != "system"]
-    lines = ["\n\n".join(part for part in instructions if part), "", "=== CONVERSATION SO FAR ==="]
+    return "\n\n".join(part for part in instructions if part), [m for m in messages if m.get("role") != "system"]
+
+
+def render_prompt(instructions: str, turns: List[Dict[str, Any]]) -> str:
+    """The transcript plus the cue for the next step (instructions only when not sent as the system prompt)."""
+    lines = [instructions, "", "=== CONVERSATION SO FAR ==="] if instructions else ["=== CONVERSATION SO FAR ==="]
     for message in turns:
         lines += [f"[{message.get('role') or 'user'}]", _text_of(message.get("content")), ""]
     lines.append("=== END ===\nWrite the next assistant message now, as the JSON the schema requires.")
@@ -183,12 +190,15 @@ class ClaudeCodeRuntime(OpenAICompatibleRuntime):
         command = [
             binary, "-p", "--output-format", "json", "--no-session-persistence",
             "--tools", "", "--restricted", "--strict-mcp-config", "--disable-slash-commands",
-            "--system-prompt", _SYSTEM_PROMPT, "--model", request.model_id,
+            "--model", request.model_id,
         ]
+        instructions, turns = split_instructions(outbound)
+        as_argument = sys.platform == "darwin" or len(instructions.encode("utf-8")) <= _SYSTEM_ARG_LIMIT
+        command += ["--system-prompt", f"{_PREAMBLE}\n\n{instructions}" if as_argument else _PREAMBLE]
         schema = _strict_response_format(request.response_schema, strip_constraints=True)
         if schema:
             command += ["--json-schema", json.dumps(schema["json_schema"]["schema"], separators=(",", ":"))]
-        prompt = render_prompt(outbound)
+        prompt = render_prompt("" if as_argument else instructions, turns)
         payload = call_with_retries(
             lambda: _run_cli(
                 command, prompt, cwd=_scratch_dir(), cancel_event=request.cancel_event,
