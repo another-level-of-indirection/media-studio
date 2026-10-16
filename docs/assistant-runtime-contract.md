@@ -66,7 +66,7 @@ For `local_openai`, `openrouter` and `merge_gateway`. These endpoints are statel
 
 - It persists a transcript per session under `data/runtime/assistant-transcripts/<id>.json`. `provider_state` is the transcript id. The `/media/files` endpoint refuses this directory.
 - It replays the transcript on each step. A new transcript starts when instructions or the session key change.
-- Compaction **drops the oldest messages** once a character budget is exceeded. It does not summarize.
+- Compaction **drops the oldest whole turns** once a character budget is exceeded, down to 60% of it. It does not summarize.
 - It normalizes the step schema for strict structured output, and accepts JSON wrapped in a code fence. Anything else is reported as a step error and is not stored.
 - Kernel steps use at least 4,000 completion tokens, because the 900-token chat default truncates plans and drafts.
 - Stop abandons the in-flight HTTP request. The request cannot be aborted, but its result is discarded.
@@ -106,7 +106,8 @@ Restart the API and web app after changing them.
 #### Known gaps
 
 - `resolve_assistant_provider_runtime` requires an API key for every non-Codex provider, which blocks local servers that need no key.
-- Summarizing compaction is not implemented; the oldest messages are dropped.
+- Compaction drops whole old turns instead of summarizing them (trimming to 60% of the budget so the prompt cache survives). Transient 5xx and connection errors are retried up to 3 times.
+- The system prompt is sent with `cache_control` for `merge_gateway`. See `assistant-claude-improvement-plan.md` for the remaining gaps (latency, billing on Stop, cost limits).
 - Strict JSON-schema reliability varies by endpoint and model. A two-turn conversation with a real tool call (`list_media_models`) completed on `claude-haiku-5-5`; long multi-tool turns, plans and drafts have not been measured.
 - Assistant settings in the UI still list only the stored providers (no Merge Gateway option).
 - Other providers (`local_openai`, `openrouter`) are still flag-only and show the Codex-oriented UI copy in some settings panels.

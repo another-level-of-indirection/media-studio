@@ -15,6 +15,7 @@ from ..settings import settings
 
 ENV_PROVIDER_KINDS = ("merge_gateway",)
 VISION_PROVIDER_KINDS = ("merge_gateway",)  # Claude accepts OpenAI-style image_url parts.
+PROMPT_CACHE_KINDS = ("merge_gateway",)  # Anthropic caches only prefixes ending at a cache_control marker.
 ANTHROPIC_SCHEMA_KINDS = ("merge_gateway",)  # Anthropic structured output rejects size/range keywords.
 
 

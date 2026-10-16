@@ -31,7 +31,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from .. import codex_local_provider, enhancement_provider
 from ..settings import settings
 from ..store_support import new_id
-from .env_providers import ANTHROPIC_SCHEMA_KINDS, VISION_PROVIDER_KINDS, selected_env_provider
+from .env_providers import ANTHROPIC_SCHEMA_KINDS, PROMPT_CACHE_KINDS, VISION_PROVIDER_KINDS, selected_env_provider
+from .resilience import call_with_retries
 from . import (
     RuntimeCapabilities,
     RuntimeInterrupted,
@@ -177,12 +178,24 @@ class OpenAICompatibleRuntime:
 
     # Kernel steps (plans, drafts) routinely exceed the 900-token chat default.
     STEP_MIN_MAX_TOKENS = 4000
-    # Rough replay budget before ``compact_before_turn`` trims old messages.
+    # Rough replay budget before ``compact_before_turn`` trims old turns.
     COMPACTION_CHAR_BUDGET = 240_000
+    # Compaction trims down to this share of the budget. Trimming only to the
+    # budget would re-trim every turn, and each trim changes the replayed
+    # prefix and so invalidates the provider's prompt cache.
+    COMPACTION_TARGET_RATIO = 0.6
 
-    def __init__(self, kind: str, *, vision: bool = False, strip_constraints: bool = False) -> None:
+    def __init__(
+        self,
+        kind: str,
+        *,
+        vision: bool = False,
+        strip_constraints: bool = False,
+        prompt_cache: bool = False,
+    ) -> None:
         self.kind = kind
         self.strip_constraints = strip_constraints
+        self.prompt_cache = prompt_cache
         self.capabilities = RuntimeCapabilities(
             structured_output=True,
             vision=vision,
@@ -238,23 +251,43 @@ class OpenAICompatibleRuntime:
         }
         return new_id("transcript"), transcript, lifecycle, reuse_mode
 
-    @staticmethod
-    def _instruction_messages(instructions: Dict[str, str]) -> List[Dict[str, Any]]:
+    def _instruction_messages(self, instructions: Dict[str, str]) -> List[Dict[str, Any]]:
         parts = [part for part in (instructions.get("base"), instructions.get("developer")) if part]
-        return [{"role": "system", "content": "\n\n".join(parts)}] if parts else []
+        if not parts:
+            return []
+        text = "\n\n".join(parts)
+        if not self.prompt_cache:
+            return [{"role": "system", "content": text}]
+        # The instructions are ~40k tokens and identical across sessions. Marking
+        # them lets every new session read them from cache instead of paying full price.
+        block = {"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}
+        return [{"role": "system", "content": [block]}]
 
     def _compact(self, messages: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
+        """Drop the oldest whole turns (a turn starts at a ``user`` message).
+
+        Cutting on turn boundaries keeps tool results with the step that asked
+        for them and keeps the transcript starting on a user message. The latest
+        turn is never cut, so one oversized turn can stay over budget.
+        """
+
         def size(items: List[Dict[str, Any]]) -> int:
             return len(json.dumps(items, separators=(",", ":")))
 
         if size(messages) <= self.COMPACTION_CHAR_BUDGET:
             return messages, None
+        target = int(self.COMPACTION_CHAR_BUDGET * self.COMPACTION_TARGET_RATIO)
+        starts = [index for index, message in enumerate(messages) if message.get("role") == "user"]
         trimmed = list(messages)
-        while len(trimmed) > 2 and size(trimmed) > self.COMPACTION_CHAR_BUDGET:
-            trimmed.pop(0)
+        for next_start in starts[1:]:
+            if size(trimmed) <= target:
+                break
+            trimmed = messages[next_start:]
+        if len(trimmed) == len(messages):
+            return messages, None
         return trimmed, {
             "outcome": "completed",
-            "strategy": "drop_oldest_messages",
+            "strategy": "drop_oldest_turns",
             "dropped_messages": len(messages) - len(trimmed),
         }
 
@@ -289,7 +322,7 @@ class OpenAICompatibleRuntime:
         ]
         max_tokens = max(int(request.connection.max_tokens or 0), self.STEP_MIN_MAX_TOKENS)
         result = _run_cancellable(
-            lambda: enhancement_provider.run_openai_compatible_chat(
+            lambda: call_with_retries(lambda: enhancement_provider.run_openai_compatible_chat(
                 provider_kind=self.kind,
                 base_url=base_url,
                 api_key=request.connection.api_key,
@@ -299,7 +332,7 @@ class OpenAICompatibleRuntime:
                 max_tokens=max_tokens,
                 response_format=_strict_response_format(request.response_schema, strip_constraints=self.strip_constraints),
                 error_context=request.error_context,
-            ),
+            ), cancel_event=request.cancel_event),
             cancel_event=request.cancel_event,
             timeout_seconds=None if request.unbounded else request.timeout_seconds,
         )
@@ -358,4 +391,4 @@ def register_experimental_runtimes(kinds: Optional[Tuple[str, ...]] = None) -> N
     registered = get_registered_kinds()
     for kind in enabled:
         if kind in SUPPORTED_KINDS and kind not in registered:
-            register_runtime(OpenAICompatibleRuntime(kind, vision=kind in VISION_PROVIDER_KINDS, strip_constraints=kind in ANTHROPIC_SCHEMA_KINDS))
+            register_runtime(OpenAICompatibleRuntime(kind, vision=kind in VISION_PROVIDER_KINDS, strip_constraints=kind in ANTHROPIC_SCHEMA_KINDS, prompt_cache=kind in PROMPT_CACHE_KINDS))

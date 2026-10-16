@@ -442,7 +442,9 @@ def run_openai_compatible_chat(
     with _http_client() as client:
         response = client.post(endpoint, headers=_openai_compatible_headers(api_key), json=request_body)
     if response.status_code >= 400:
-        raise EnhancementProviderError(f"{provider_kind} {error_context} failed with {response.status_code}.")
+        failure = EnhancementProviderError(f"{provider_kind} {error_context} failed with {response.status_code}.")
+        failure.status_code = response.status_code  # lets callers retry transient failures
+        raise failure
     payload = response.json()
     usage = _extract_usage_payload(payload)
     generated_text = _extract_message_text(payload).strip()

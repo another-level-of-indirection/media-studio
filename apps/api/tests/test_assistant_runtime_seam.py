@@ -346,7 +346,7 @@ def test_openai_runtime_compaction_drops_oldest_messages(openai_runtime) -> None
 
     result = runtime.run_step(_request(openai_runtime, "now", provider_state=state, compact_before_turn=True))
 
-    assert result.compaction["strategy"] == "drop_oldest_messages"
+    assert result.compaction["strategy"] == "drop_oldest_turns"
     assert result.compaction["dropped_messages"] > 0
 
 
@@ -532,3 +532,146 @@ def test_merge_gateway_runtime_strips_constraints_others_do_not(app_modules, mon
 
     assert runtime_module.get_assistant_runtime("merge_gateway").strip_constraints is True
     assert runtime_module.get_assistant_runtime("local_openai").strip_constraints is False
+
+
+def test_prompt_cache_marks_the_system_prompt_only_when_enabled(openai_runtime) -> None:
+    plain = openai_runtime.runtime
+    cached = openai_runtime.module.OpenAICompatibleRuntime("merge_gateway", prompt_cache=True)
+
+    plain.run_step(_request(openai_runtime))
+    cached.run_step(_request(openai_runtime, session_key="s:1"))
+
+    assert openai_runtime.captured[0]["messages"][0] == {"role": "system", "content": "BASE\n\nDEV"}
+    block = openai_runtime.captured[1]["messages"][0]["content"][0]
+    assert block == {"type": "text", "text": "BASE\n\nDEV", "cache_control": {"type": "ephemeral"}}
+
+
+def test_merge_gateway_runtime_enables_prompt_cache(app_modules, monkeypatch) -> None:
+    del app_modules
+    _use_merge(monkeypatch)
+    runtime_module = importlib.import_module("app.assistant_runtime")
+
+    assert runtime_module.get_assistant_runtime("merge_gateway").prompt_cache is True
+
+
+def _turns(count: int, size: int = 100):
+    messages = []
+    for index in range(count):
+        messages += [
+            {"role": "user", "content": f"u{index}" + "x" * size},
+            {"role": "assistant", "content": "a" * size},
+            {"role": "tool", "content": "t" * size},
+            {"role": "assistant", "content": "done"},
+        ]
+    return messages
+
+
+def test_compaction_cuts_on_turn_boundaries_and_trims_below_the_budget(openai_runtime) -> None:
+    runtime = openai_runtime.runtime
+    runtime.COMPACTION_CHAR_BUDGET = 2000
+    messages = _turns(8)
+
+    kept, outcome = runtime._compact(messages)
+
+    assert kept[0]["role"] == "user"
+    assert kept[-1] == messages[-1]
+    assert len(json.dumps(kept, separators=(",", ":"))) <= 2000 * runtime.COMPACTION_TARGET_RATIO
+    assert outcome["dropped_messages"] == len(messages) - len(kept)
+    assert (len(messages) - len(kept)) % 4 == 0  # whole turns only
+
+
+def test_compaction_leaves_room_so_the_next_turn_does_not_recompact(openai_runtime) -> None:
+    runtime = openai_runtime.runtime
+    runtime.COMPACTION_CHAR_BUDGET = 2000
+    kept, _ = runtime._compact(_turns(8))
+
+    again, outcome = runtime._compact([*kept, *_turns(1)])
+
+    assert outcome is None and len(again) == len(kept) + 4
+
+
+def test_compaction_never_cuts_the_only_turn(openai_runtime) -> None:
+    runtime = openai_runtime.runtime
+    runtime.COMPACTION_CHAR_BUDGET = 50
+    messages = _turns(1, size=400)
+
+    kept, outcome = runtime._compact(messages)
+
+    assert kept == messages and outcome is None
+
+
+def _flaky_chat(openai_runtime, monkeypatch, outcomes):
+    calls = []
+
+    def fake(**kwargs):
+        calls.append(kwargs)
+        outcome = outcomes[min(len(calls) - 1, len(outcomes) - 1)]
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr(openai_runtime.ep, "run_openai_compatible_chat", fake)
+    monkeypatch.setattr(importlib.import_module("app.assistant_runtime.resilience"), "BACKOFF_SECONDS", (0, 0))
+    return calls
+
+
+def _http_error(openai_runtime, status):
+    error = openai_runtime.ep.EnhancementProviderError(f"failed with {status}.")
+    error.status_code = status
+    return error
+
+
+def test_transient_failures_are_retried(openai_runtime, monkeypatch) -> None:
+    ok = {"generated_text": '{"reply":"ok"}', "usage": {}}
+    calls = _flaky_chat(openai_runtime, monkeypatch, [_http_error(openai_runtime, 504), _http_error(openai_runtime, 429), ok])
+
+    result = openai_runtime.runtime.run_step(_request(openai_runtime))
+
+    assert len(calls) == 3
+    assert json.loads(result.text) == {"reply": "ok"}
+
+
+def test_client_errors_are_not_retried(openai_runtime, monkeypatch) -> None:
+    calls = _flaky_chat(openai_runtime, monkeypatch, [_http_error(openai_runtime, 400)])
+
+    with pytest.raises(openai_runtime.ep.EnhancementProviderError):
+        openai_runtime.runtime.run_step(_request(openai_runtime))
+
+    assert len(calls) == 1
+
+
+def test_retries_give_up_and_state_does_not_advance(openai_runtime, monkeypatch) -> None:
+    calls = _flaky_chat(openai_runtime, monkeypatch, [_http_error(openai_runtime, 503)])
+
+    with pytest.raises(openai_runtime.ep.EnhancementProviderError):
+        openai_runtime.runtime.run_step(_request(openai_runtime))
+
+    assert len(calls) == 3
+    assert not list(openai_runtime.module.transcripts_dir().glob("*.json"))
+
+
+def test_connection_errors_become_provider_errors_after_retries(openai_runtime, monkeypatch) -> None:
+    import httpx
+
+    calls = _flaky_chat(openai_runtime, monkeypatch, [httpx.ConnectError("boom")])
+
+    with pytest.raises(openai_runtime.ep.EnhancementProviderError, match="could not be reached"):
+        openai_runtime.runtime.run_step(_request(openai_runtime))
+
+    assert len(calls) == 3
+
+
+def test_cancel_stops_retrying(openai_runtime, monkeypatch) -> None:
+    cancel = threading.Event()
+    cancel.set()
+    resilience = importlib.import_module("app.assistant_runtime.resilience")
+    attempts = []
+
+    def failing():
+        attempts.append(1)
+        raise _http_error(openai_runtime, 503)
+
+    with pytest.raises(openai_runtime.ep.EnhancementProviderError):
+        resilience.call_with_retries(failing, cancel_event=cancel)
+
+    assert len(attempts) == 1
