@@ -166,6 +166,7 @@ class StoryboardEditTests(unittest.TestCase):
         self.assertEqual(review_workflow_generation(self.workflow)["status"], "pending")
         self.workflow.nodes[1].metadata = {"execution": {"mode": "muted"}}
         self.assertEqual(review_workflow_generation(self.workflow)["nodes"], [])
+        self.assertEqual(review_workflow_generation(self.workflow)["status"], "empty")
 
     def test_run_review_reports_real_preflight_error_without_submission(self):
         from app.assistant.generation_inspection import review_workflow_generation

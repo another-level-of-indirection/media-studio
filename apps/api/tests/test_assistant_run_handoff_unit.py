@@ -210,6 +210,15 @@ class RunHandoffTests(unittest.TestCase):
         self.assertIn("panel sequence is empty", message["content_text"])
         self.assertIsNone(self.session["summary_json"]["kernel_run_confirmation"])
 
+    def test_graph_without_generation_nodes_does_not_claim_inputs_passed_preflight(self):
+        with patch.object(kernel_route, "review_workflow_generation", return_value={
+            "status": "empty", "nodes": [], "provider_submitted": False,
+        }):
+            message = self.message_turn({"reply": "Ready to generate."})
+        self.assertIn("no generation nodes to preflight", message["content_text"])
+        self.assertNotIn("passed preflight", message["content_text"])
+        self.assertNotIn("Ready to generate", message["content_text"])
+
     def test_pending_preflight_is_not_presented_as_confirmed_ready(self):
         with patch.object(kernel_route, "review_workflow_generation", return_value={
             "status": "pending", "nodes": [{"node_id": "image", "status": "pending"}], "provider_submitted": False,

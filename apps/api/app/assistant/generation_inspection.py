@@ -197,7 +197,7 @@ def review_workflow_generation(workflow):
             nodes.append({"node_id": node.id, "status": status, "reason": reason})
         except (ValueError, HTTPException, ServiceError) as error:
             nodes.append({"node_id": node.id, "status": "blocked", "reason": str(getattr(error, "detail", error))})
-    status = "blocked" if any(n["status"] == "blocked" for n in nodes) else (
+    status = "empty" if not nodes else "blocked" if any(n["status"] == "blocked" for n in nodes) else (
         "pending" if any(n["status"] == "pending" for n in nodes) else "ready"
     )
     return {"status": status, "nodes": nodes, "provider_submitted": False}

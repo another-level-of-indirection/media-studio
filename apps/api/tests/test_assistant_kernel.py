@@ -2149,9 +2149,11 @@ def test_kernel_run_request_returns_typed_confirmation_without_submitting_a_job(
     assistant_message = payload["messages"][-1]
     turn = assistant_message["content_json"]["kernel_turn"]
     readiness = turn["next_action"]["payload"]["generation_readiness"]
-    assert readiness["status"] == "ready"
+    # This fixture has no generation node, so nothing was preflighted.
+    assert readiness["status"] == "empty"
     assert readiness["provider_submitted"] is False
-    assert "Known generation inputs passed preflight" in assistant_message["content_text"]
+    assert "no generation nodes to preflight" in assistant_message["content_text"]
+    assert "passed preflight" not in assistant_message["content_text"]
     assert "Account readiness remains unknown" in assistant_message["content_text"]
     assert "choosing Review and run submits this graph" in assistant_message["content_text"]
     assert "Nothing has started" in assistant_message["content_text"]

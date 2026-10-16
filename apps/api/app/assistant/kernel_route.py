@@ -257,6 +257,8 @@ def _create_tracked_kernel_message(
         readiness_note = (
             "Prompt checks are pending for dynamic or unknown inputs; this graph is not yet confirmed ready. "
             if generation_readiness and generation_readiness["status"] == "pending"
+            else "This graph has no generation nodes to preflight, so no inputs were checked. Account readiness remains unknown. "
+            if generation_readiness and generation_readiness["status"] == "empty"
             else "Known generation inputs passed preflight. Account readiness remains unknown. "
         )
         result.reply = (
