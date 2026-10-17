@@ -943,6 +943,41 @@ def test_codex_app_server_accepts_success_after_transient_retry_error(monkeypatc
     assert result["generated_text"] == "READY"
 
 
+def test_codex_app_server_finishes_a_turn_that_never_reports_completion(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    provider = enhancement_provider.codex_local_provider
+    monkeypatch.setattr(provider, "CODEX_LOCAL_COMPLETION_GRACE_SECONDS", 0.0)
+    session = provider._CodexAppServerSession(temp_root=tmp_path)
+    messages = iter(
+        [
+            {
+                "method": "item/completed",
+                "params": {"turnId": "turn-1", "item": {"type": "agentMessage", "phase": "final_answer", "text": "DONE"}},
+            },
+            {
+                "method": "thread/tokenUsage/updated",
+                "params": {"turnId": "turn-1", "tokenUsage": {"last": {"totalTokens": 7}, "modelContextWindow": 1000}},
+            },
+        ],
+    )
+    # After the two messages the server goes silent: no turn/completed, no idle status.
+    monkeypatch.setattr(session, "_read_message", lambda *_a, **_k: next(messages, None))
+
+    result = session._collect_turn(thread_id="thread-1", turn_id="turn-1", initial_notifications=[])
+
+    assert result["generated_text"] == "DONE"
+    assert result["usage"]["total_tokens"] == 7
+
+
+def test_codex_app_server_does_not_finish_silently_without_a_final_answer(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    provider = enhancement_provider.codex_local_provider
+    monkeypatch.setattr(provider, "CODEX_LOCAL_COMPLETION_GRACE_SECONDS", 0.0)
+    session = provider._CodexAppServerSession(temp_root=tmp_path, timeout_seconds=0.3)
+    monkeypatch.setattr(session, "_read_message", lambda *_a, **_k: None)
+
+    with pytest.raises(provider.CodexLocalProviderError, match="timed out"):
+        session._collect_turn(thread_id="thread-1", turn_id="turn-1", initial_notifications=[])
+
+
 def test_codex_app_server_preserves_terminal_turn_failure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     session = enhancement_provider.codex_local_provider._CodexAppServerSession(temp_root=tmp_path)
     messages = iter(
