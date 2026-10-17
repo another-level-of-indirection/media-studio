@@ -22,9 +22,12 @@ CODEX_APP_SERVER_TIMEOUT_SECONDS = 300
 CODEX_LOCAL_CATALOG_CACHE_TTL_SECONDS = 300
 CODEX_LOCAL_SKILL_SESSION_TTL_SECONDS = 900
 CODEX_LOCAL_SKILL_SESSION_REAP_SECONDS = 60
+# The app server sometimes finishes a turn (final answer and token usage delivered) without ever
+# sending `turn/completed` or an idle status, which would otherwise wait out the whole budget.
+CODEX_LOCAL_COMPLETION_GRACE_SECONDS = 5.0
 CODEX_LOCAL_COMPACTION_TRIGGER_RATIO = 0.70
 CODEX_LOCAL_COMPACTION_HYSTERESIS_RATIO = 0.10
-CODEX_LOCAL_DEFAULT_MODEL = "gpt-5.6-sol"
+CODEX_LOCAL_DEFAULT_MODEL = "gpt-6.1-sol"
 CODEX_LOCAL_PROVIDER_BASE_URL = "codex://app-server"
 CODEX_LOCAL_PROVIDER_CREDENTIAL_SOURCE = "codex_local_login"
 CODEX_LOCAL_JSON_OBJECT_INSTRUCTION = (
@@ -1105,6 +1108,7 @@ class _CodexAppServerSession:
             if handle_message(notification):
                 break
 
+        quiet_since: float | None = None
         while not turn_completed:
             if cancel_event and cancel_event.is_set():
                 self.interrupt_turn(thread_id=thread_id, turn_id=turn_id)
@@ -1114,7 +1118,12 @@ class _CodexAppServerSession:
                 raise CodexLocalProviderError("Codex Local timed out while waiting for a response.")
             message = self._read_message(0.25, allow_timeout=True)
             if message is None:
+                if final_text and usage_snapshot:
+                    quiet_since = quiet_since or time.monotonic()
+                    if time.monotonic() - quiet_since >= CODEX_LOCAL_COMPLETION_GRACE_SECONDS:
+                        turn_completed = True
                 continue
+            quiet_since = None
             budget.observe(message, thread_id)
             handle_message(message)
 
